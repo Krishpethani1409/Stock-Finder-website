@@ -1,16 +1,86 @@
-# React + Vite
+# 📈 Stock Finder
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An all-in-one Indian stock market platform with live stock tracking, interactive charts, market insights, stock screeners, IPO updates, mutual funds, trading tools and investment calculators, all in one place.
 
-Currently, two official plugins are available:
+## ✨ Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Live stock tracking with a scrolling ticker tape
+- Real-time market indices in the navbar
+- Interactive TradingView charts
+- Stock screeners to find stocks quickly
+- IPO updates
+- Mutual funds information
+- Investment calculators
+- Responsive, modern UI
 
-## React Compiler
+## 🛠️ Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Area | Technology |
+|------|------------|
+| Frontend | React, Vite, Tailwind CSS |
+| Backend | Node.js |
+| Charts | TradingView widgets |
+| Tools | Git, GitHub, npm |
 
-## Expanding the ESLint configuration
+## 📁 Project Structure
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```
+Stock-Finder-website/
+├── public/          # Static assets
+├── src/             # React source code
+├── components/      # Reusable UI components
+├── stock-backend/   # Backend server
+├── index.html
+├── package.json
+└── vite.config.js
+```
+
+## 🚀 Getting Started
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- npm
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/Krishpethani1409/Stock-Finder-website.git
+cd Stock-Finder-website
+```
+
+### 2. Run the frontend
+```bash
+npm install
+npm run dev
+```
+Open the link shown in the terminal (usually `http://localhost:5173`).
+
+### 3. Run the backend
+Open a second terminal:
+```bash
+cd stock-backend
+npm install
+npm start
+```
+
+## 🔐 Environment Variables
+
+If the backend needs API keys, create a `.env` file inside `stock-backend/` (never upload this file to GitHub):
+
+```
+API_KEY=your_api_key_here
+PORT=5000
+```
+
+## 🔮 Future Improvements
+
+- User login and watchlists
+- Portfolio tracking
+- Price alerts
+- Dark/light theme toggle
+
+## 👤 Author
+
+**Krish Pethani**
+GitHub: [@Krishpethani1409](https://github.com/Krishpethani1409)
+
+⭐ If you like this project, give it a star!
