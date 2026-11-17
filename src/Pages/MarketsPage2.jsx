@@ -1,1217 +1,574 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import Navbar from '../components/Navbar.jsx';
-import { 
-  Maximize2, Minimize2, Check, Plus, BookOpen, ExternalLink, 
-  TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Sparkles,
-  Share2, ArrowRight
-} from 'lucide-react';
+import React, { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import Navbar from "../components/Navbar.jsx";
+import TVChart from "../components/TVChart.jsx";
+import OrderModal from "../components/OrderModal.jsx";
+import { useMarketsData, useIndexChart, useExtra, useAllIndexDays, inr } from "../components/useMarketsData.js";
 
-export default function MarketsPage() {
+/* Broker-style "Stock Discovery" Markets page.
+   Layout follows the classic broker markets overview. Live data from our backend. */
+const IDX_TV = { NIFTY: "BSE:NIFTYBEES", SENSEX: "BSE:SENSEX", BANKNIFTY: "BSE:BANKBEES" };
+const RANGES = [["1d", "1D"], ["1w", "1W"], ["1m", "1M"], ["1y", "1Y"]];
+
+const css = `
+.ao{font-family:'Inter',system-ui,sans-serif;background:#0B0F19;color:#d1d4dc;min-height:100vh;font-size:13px}
+.ao *{box-sizing:border-box}
+.ao-w{max-width:1260px;margin:0 auto;padding:14px 16px 60px;display:flex;flex-direction:column;gap:18px}
+.ao-sub{display:flex;gap:4px;background:#131927;border:1px solid #1e293b;border-radius:10px;padding:6px 10px;overflow-x:auto}
+.ao-sub button{background:none;border:0;color:#787b86;font-size:13px;padding:8px 14px;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent}
+.ao-sub button.on{color:#2962ff;border-color:#2962ff}
+.ao-card{background:#131927;border:1px solid #1e293b;border-radius:14px;padding:22px}
+.ao-t{font-size:16px;font-weight:700;margin:0 0 16px;font-family:'Sora','Inter',sans-serif}
+.ao-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.ao-va{color:#2962ff;font-size:12px;font-weight:700;cursor:pointer;background:none;border:0}
+.ao-up{color:#00b386}.ao-dn{color:#e5314a}
+.ao-itabs{display:grid;grid-template-columns:repeat(6,1fr) 110px;border:1px solid #1e293b;border-radius:8px;overflow:hidden;margin-bottom:18px}
+.ao-it{background:none;border:0;border-bottom:2px solid transparent;color:inherit;font:inherit;text-align:left;padding:10px 14px;cursor:pointer}
+.ao-it b{display:block;font-size:11px;color:#787b86;font-weight:600}
+.ao-it.on{background:#182033;border-color:#2962ff}
+.ao-it .v{font-variant-numeric:tabular-nums;font-weight:600;margin-top:3px;font-size:12px}
+.ao-ov{display:grid;grid-template-columns:1fr 1.5fr;gap:24px;background:#0E1320;border:1px solid #1e293b;border-radius:10px;padding:20px}
+.ao-gauge{height:6px;border-radius:9px;background:linear-gradient(90deg,#e5314a,#00b386);position:relative;margin:14px 0 10px}
+.ao-gauge i{position:absolute;top:-6px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #d1d4dc;transform:translateX(-5px)}
+.ao-4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:22px}
+.ao-4 small{display:block;color:#787b86;font-size:11px;margin-bottom:3px}
+.ao-pills{display:flex;gap:8px;margin-top:6px}
+.ao-pill{border:1px solid #363b4d;background:none;color:#d1d4dc;border-radius:99px;padding:4px 12px;font-size:11px;cursor:pointer}
+.ao-pill.on{border-color:#2962ff;color:#2962ff}
+.ao-5{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.ao-sc{background:#0E1320;border:1px solid #1e293b;border-radius:10px;padding:14px;cursor:pointer;min-width:0}
+.ao-sc:hover{border-color:#2962ff}
+.ao-sc b{display:block;font-size:12px}
+.ao-sc span{display:block;font-size:10px;color:#787b86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:10px}
+.ao-sc div{font-size:12px;font-variant-numeric:tabular-nums}
+.ao-2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.ao-tabs{display:flex;gap:8px;margin-bottom:12px}
+.ao-tab{background:none;border:1px solid #1e293b;color:#d1d4dc;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer}
+.ao-tab.on{border-color:#2962ff;color:#2962ff;background:#2962ff14}
+.ao-tbl{width:100%;border-collapse:collapse}
+.ao-tbl th{background:#182033;color:#787b86;font-weight:600;font-size:11px;text-align:right;padding:9px 10px}
+.ao-tbl th:first-child,.ao-tbl td:first-child{text-align:left}
+.ao-tbl td{padding:12px 10px;text-align:right;border-bottom:1px solid #1e293b;font-variant-numeric:tabular-nums}
+.ao-tbl tr.r{cursor:pointer}.ao-tbl tr.r:hover td{background:#182033}
+.ao-tbl small{display:block;color:#787b86;font-size:10px;margin-top:2px}
+.ao-chip{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.ao-chip.u{background:#00b38622;color:#00b386}.ao-chip.d{background:#e5314a22;color:#e5314a}
+.ao-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.ao-sig{display:flex;gap:12px;background:#0E1320;border:1px solid #1e293b;border-radius:10px;padding:14px}
+.ao-sig svg{flex:none}
+.ao-rec{background:#0E1320;border:1px solid #1e293b;border-radius:10px;padding:16px}
+.ao-rng{position:relative;height:3px;background:#1e293b;margin:22px 0 8px}
+.ao-rng i{position:absolute;top:-4px;width:10px;height:10px;border-radius:50%;transform:translateX(-5px)}
+.ao-buy{background:#00b386;color:#04130f;border:0;border-radius:6px;padding:6px 18px;font-weight:700;cursor:pointer}
+.ao-news{border-bottom:1px solid #1e293b;padding:12px 0}
+.ao-news small{color:#787b86}
+.ao-tag{float:right;background:#00b38622;color:#00b386;font-size:10px;padding:2px 8px;border-radius:4px}
+.ao-soc{display:flex;gap:10px}
+.ao-soc span{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px}
+.ao-empty{color:#787b86;padding:18px 0;text-align:center}
+
+.ao-tbl td:not(:first-child),.ao-sc div,.ao-it .v,.ao-4 div,.ao-sig .ao-row span,.ao-rec b{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.ao-card{border-radius:10px;padding:18px}
+.ao-t{font-size:15px}
+.ao-tab{border-radius:999px;color:#787b86}
+.ao-tab.on{background:#16233d}
+.ao-tbl th{background:#182033}
+.ao-sc{position:relative;border-radius:8px;padding:12px}
+.ao-acts{display:none;gap:4px;align-items:center;justify-content:flex-end}
+.ao-sc .ao-acts{position:absolute;top:10px;right:10px}
+.ao-sc:hover .ao-acts{display:flex}
+.ao-sig{position:relative}
+.ao-sig .ao-acts{position:absolute;right:12px;bottom:10px}
+.ao-sig:hover .ao-acts{display:flex}
+.ao-tbl tr:hover .ao-val{display:none}
+.ao-tbl tr:hover .ao-acts{display:inline-flex}
+.ao-ab{width:24px;height:24px;border-radius:4px;border:0;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-family:'Inter',sans-serif}
+.ao-ab.b{background:#00b386;color:#fff}.ao-ab.s{background:#e5314a;color:#fff}
+.ao-ab.c{background:#1e293b;color:#d1d4dc}.ao-ab.c:hover{background:#2962ff;color:#fff}
+.ao-ab:hover{filter:brightness(1.15)}
+
+/* ── compact terminal look (matches the old Markets page) ── */
+.ao{font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.ao-w{max-width:1600px;padding:10px 16px 40px;gap:12px}
+.ao-sub{border-radius:8px;padding:2px 8px}
+.ao-sub button{font-size:11px;padding:7px 12px;font-family:inherit}
+.ao-card{border-radius:8px;padding:12px 14px}
+.ao-t{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin:0 0 10px;font-family:inherit}
+.ao-va{font-size:10px;letter-spacing:.06em;font-family:inherit}
+.ao-itabs{margin-bottom:12px}
+.ao-it{padding:8px 12px}.ao-it b{font-size:10px;letter-spacing:.05em}.ao-it .v{font-size:11px}
+.ao-ov{padding:14px;gap:18px;border-radius:8px}
+.ao-4{margin-top:16px}.ao-4 small{font-size:10px}
+.ao-pill,.ao-tab{font-size:10px;padding:4px 10px;font-family:inherit;border-radius:4px}
+.ao-tabs{margin-bottom:8px;gap:6px}
+.ao-5{gap:8px}.ao-3{gap:10px}.ao-2{gap:12px}
+.ao-sc{padding:10px;border-radius:6px}.ao-sc b{font-size:11px}.ao-sc span{font-size:10px;margin-bottom:6px}.ao-sc div{font-size:11px}
+.ao-tbl th{font-size:10px;padding:6px 8px;text-transform:uppercase;letter-spacing:.05em;font-family:inherit}
+.ao-tbl td{padding:8px;font-size:11px}
+.ao-tbl small{font-size:10px}
+.ao-chip{font-size:10px;padding:2px 6px;border-radius:3px}
+.ao-sig,.ao-rec{padding:10px;border-radius:6px}
+.ao-buy{padding:4px 14px;font-size:11px;border-radius:4px;font-family:inherit}
+.ao-news{padding:8px 0;font-size:11px}
+.ao-ab{width:22px;height:22px;font-size:10px}
+.ao-tbl td:first-child b{font-size:11px;font-weight:700}
+@media(max-width:1000px){.ao-5{grid-template-columns:repeat(2,1fr)}.ao-2,.ao-3,.ao-ov{grid-template-columns:1fr}.ao-itabs{grid-template-columns:repeat(3,1fr)}}
+`;
+
+const STEP = { NIFTY: 50, BANKNIFTY: 100, FINNIFTY: 50, MIDCPNIFTY: 25, SENSEX: 100 };
+const timeAgo = (t) => {
+  if (!t) return "";
+  const ms = /^\d+$/.test(String(t)) ? Number(t) * 1000 : Date.parse(t);
+  if (!ms) return "";
+  const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} hr ago` : `${Math.round(m / 1440)} d ago`;
+};
+const pivot = (s) => {
+  const P = (s.high + s.low + s.prev) / 3;
+  return { P, R1: 2 * P - s.low, S1: 2 * P - s.high };
+};
+
+export default function MarketsAngelOne() {
   const navigate = useNavigate();
+  const { indices, stocks, status } = useMarketsData();
+  const [sub, setSub] = useState("Stock Discovery");
+  const [ikey, setIkey] = useState("NIFTY");
+  const [range, setRange] = useState("1d");
+  const [tv, setTv] = useState("BSE:NIFTYBEES");
+  const [mv, setMv] = useState("gain");
+  const [sector, setSector] = useState(null);
+  const [tech, setTech] = useState("pivot");
+  const [sigTab, setSigTab] = useState("Candlesticks");
+  const [pocket, setPocket] = useState(50);
+  const [ca, setCa] = useState("Split");
+  const { data: ch, err } = useIndexChart(ikey, range);
+  const idxKeys = useMemo(() => indices.map((i) => i.key), [indices]);
+  const days = useAllIndexDays(idxKeys, sub === "Index F&O" || sub === "All Indices");
+  const com = useExtra("/market/commodities", sub === "Commodities");
+  const newsX = useExtra("/market/news", sub === "News");
 
-  // Active Symbol for Full-Width TradingView Chart
-  const [activeChartSymbol, setActiveChartSymbol] = useState('NSE:NIFTY');
-  const [activeTimeframe, setActiveTimeframe] = useState('D');
-  const [isChartFullscreen, setIsChartFullscreen] = useState(false);
-
-  // Active Tab States
-  const [moversTab, setMoversTab] = useState('GAINERS');
-  const [ipoTab, setIpoTab] = useState('CURRENT');
-
-  // Watchlist Tracker
-  const [watchlist, setWatchlist] = useState(['RELIANCE', 'TCS', 'HDFCBANK']);
-
-  // TradingView Container Reference
-  const tvContainerRef = useRef(null);
-
-  const toggleWatchlist = (symbol) => {
-    setWatchlist(prev => 
-      prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]
-    );
+  const cur = indices.find((i) => i.key === ikey) || indices[0];
+  const go = (sym) => navigate(`/screener/${sym}`);
+  const buy = (e, sym) => { e.stopPropagation(); navigate("/tradeone", { state: { tv: `BSE:${sym}`, label: sym } }); };
+  const [order, setOrder] = useState(null);
+  const goChart = (key) => navigate("/tradeone", { state: { tv: IDX_TV[key] || "BSE:NIFTYBEES", label: key } });
+  const trade = (e, sym, side) => {
+    e.stopPropagation();
+    if (!side) { navigate("/tradeone", { state: { tv: `BSE:${sym}`, label: sym } }); return; }   // chart icon
+    const st = stocks.find((x) => x.symbol === sym);
+    setOrder({ sym, name: st ? st.name : sym, side, ltp: st ? st.price : 0 });
   };
+  const Acts = ({ sym }) => (
+    <span className="ao-acts" onClick={(e) => e.stopPropagation()}>
+      <button className="ao-ab b" title="Buy" onClick={(e) => trade(e, sym, "BUY")}>B</button>
+      <button className="ao-ab s" title="Sell" onClick={(e) => trade(e, sym, "SELL")}>S</button>
+      <button className="ao-ab c" title="Chart" onClick={(e) => trade(e, sym)}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M4 20V10M10 20V4M16 20v-7M22 20V8" /></svg>
+      </button>
+    </span>
+  );
+  const pct = (n) => (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
 
-  // -------------------------------------------------------------
-  // TRADINGVIEW WIDGET INITIALIZATION
-  // -------------------------------------------------------------
-  useEffect(() => {
-    if (tvContainerRef.current) {
-      tvContainerRef.current.innerHTML = '';
-      const script = document.createElement('script');
-      script.src = 'https://s3.tradingview.com/tv.js';
-      script.type = 'text/javascript';
-      script.async = true;
-      script.onload = () => {
-        if (window.TradingView) {
-          new window.TradingView.widget({
-            autosize: true,
-            symbol: activeChartSymbol,
-            interval: activeTimeframe,
-            timezone: "Asia/Kolkata",
-            theme: "dark",
-            style: "1",
-            locale: "en",
-            toolbar_bg: "#0B0F19",
-            enable_publishing: false,
-            allow_symbol_change: true,
-            container_id: "tradingview_markets_chart",
-            hide_side_toolbar: false,
-            studies: [
-              "MASimple@tv-basicstudies",
-              "RSI@tv-basicstudies",
-              "Volume@tv-basicstudies"
-            ],
-            overrides: {
-              "paneProperties.background": "#0B0F19",
-              "paneProperties.vertGridProperties.color": "#1E293B",
-              "paneProperties.horzGridProperties.color": "#1E293B",
-              "symbolWatermarkProperties.transparency": 90,
-              "scalesProperties.textColor": "#94A3B8"
-            }
-          });
-        }
-      };
-      tvContainerRef.current.appendChild(script);
-    }
-  }, [activeChartSymbol, activeTimeframe]);
+  const sectors = useMemo(() => [...new Set(stocks.map((s) => s.sector))].sort(), [stocks]);
+  const sec = sector || sectors[0];
+  const mostBought = useMemo(() => [...stocks].sort((a, b) => b.volume * b.price - a.volume * a.price).slice(0, 5), [stocks]);
+  const movers = useMemo(() => {
+    const a = [...stocks].sort((x, y) => (mv === "gain" ? y.pct - x.pct : x.pct - y.pct));
+    return a.slice(0, 5);
+  }, [stocks, mv]);
+  const secRows = useMemo(() => stocks.filter((s) => s.sector === sec).sort((a, b) => b.pct - a.pct).slice(0, 5), [stocks, sec]);
 
-  // -------------------------------------------------------------
-  // DATA COLLECTIONS
-  // -------------------------------------------------------------
-  const liveTickerItems = [
-    { name: 'NIFTY 50', price: '23,984.15', chg: '+124.50', pct: '+0.52%', up: true, tvSymbol: 'NSE:NIFTY' },
-    { name: 'SENSEX', price: '78,718.40', chg: '+380.10', pct: '+0.49%', up: true, tvSymbol: 'BSE:SENSEX' },
-    { name: 'BANKNIFTY', price: '51,240.80', chg: '+385.30', pct: '+0.76%', up: true, tvSymbol: 'NSE:BANKNIFTY' },
-    { name: 'FINNIFTY', price: '22,840.10', chg: '+112.40', pct: '+0.49%', up: true, tvSymbol: 'NSE:FINNIFTY' },
-    { name: 'MIDCAP', price: '56,120.90', chg: '+445.80', pct: '+0.80%', up: true, tvSymbol: 'NSE:CNXMIDCAP' },
-    { name: 'SMALLCAP', price: '18,450.20', chg: '+210.40', pct: '+1.15%', up: true, tvSymbol: 'NSE:CNXSMALLCAP' },
-    { name: 'USDINR', price: '83.74', chg: '-0.08', pct: '-0.10%', up: false, tvSymbol: 'FX_IDC:USDINR' },
-    { name: 'GOLD (10g)', price: '72,840', chg: '+320.00', pct: '+0.44%', up: true, tvSymbol: 'MCX:GOLD1!' },
-    { name: 'SILVER (1kg)', price: '86,450', chg: '-140.00', pct: '-0.16%', up: false, tvSymbol: 'MCX:SILVER1!' },
-    { name: 'CRUDE OIL', price: '6,420', chg: '+45.00', pct: '+0.71%', up: true, tvSymbol: 'MCX:CRUDEOIL1!' },
-    { name: 'BTC/USD', price: '66,840.00', chg: '+1,240.00', pct: '+1.89%', up: true, tvSymbol: 'BINANCE:BTCUSDT' },
-    { name: 'ETH/USD', price: '3,480.20', chg: '+84.10', pct: '+2.48%', up: true, tvSymbol: 'BINANCE:ETHUSDT' },
-  ];
+  const techList = useMemo(() => {
+    const a = stocks.map((s) => ({ ...s, ...pivot(s) }));
+    if (tech === "pivot") return a.filter((s) => s.price > s.P).sort((x, y) => y.price / y.P - x.price / x.P).slice(0, 5);
+    if (tech === "high") return [...a].sort((x, y) => (y.price - y.low) / (y.high - y.low || 1) - (x.price - x.low) / (x.high - x.low || 1)).slice(0, 5);
+    return [...a].sort((x, y) => (x.price - x.low) / (x.high - x.low || 1) - (y.price - y.low) / (y.high - y.low || 1)).slice(0, 5);
+  }, [stocks, tech]);
 
-  const marketIndicesTable = [
-    { name: 'NIFTY 50', price: '23,984.15', chg: '+124.50', pct: '+0.52%', low: '23,810.40', high: '24,025.80', tvSymbol: 'NSE:NIFTY' },
-    { name: 'SENSEX', price: '78,718.40', chg: '+380.10', pct: '+0.49%', low: '78,220.10', high: '78,950.30', tvSymbol: 'BSE:SENSEX' },
-    { name: 'BANKNIFTY', price: '51,240.80', chg: '+385.30', pct: '+0.76%', low: '50,810.00', high: '51,420.50', tvSymbol: 'NSE:BANKNIFTY' },
-    { name: 'FINNIFTY', price: '22,840.10', chg: '+112.40', pct: '+0.49%', low: '22,680.00', high: '22,910.00', tvSymbol: 'NSE:FINNIFTY' },
-    { name: 'MIDCAP 100', price: '56,120.90', chg: '+445.80', pct: '+0.80%', low: '55,600.00', high: '56,350.00', tvSymbol: 'NSE:CNXMIDCAP' },
-    { name: 'SMALLCAP 100', price: '18,450.20', chg: '+210.40', pct: '+1.15%', low: '18,200.00', high: '18,520.00', tvSymbol: 'NSE:CNXSMALLCAP' },
-    { name: 'INDIA VIX', price: '13.42', chg: '-0.58', pct: '-4.14%', low: '13.10', high: '14.10', tvSymbol: 'NSE:INDIAVIX' },
-  ];
+  const signals = useMemo(() => stocks.slice(0, 3).map((s) => {
+    const pos = (s.price - s.low) / (s.high - s.low || 1);
+    const body = Math.abs(s.pct);
+    const label = body < 0.3 ? "Doji (Neutral)" : s.pct > 0 ? (pos > 0.8 ? "Bullish Marubozu" : "Bullish") : (pos < 0.2 ? "Bearish Marubozu" : "Bearish");
+    return { ...s, label, pos };
+  }), [stocks]);
 
-  const globalMarketsTable = [
-    { country: '🇺🇸 US', name: 'S&P 500', price: '5,584.60', chg: '+62.10', pct: '+1.12%', status: 'CLOSED' },
-    { country: '🇺🇸 US', name: 'NASDAQ 100', price: '19,820.40', chg: '+284.50', pct: '+1.45%', status: 'CLOSED' },
-    { country: '🇬🇧 UK', name: 'FTSE 100', price: '8,210.30', chg: '-18.40', pct: '-0.22%', status: 'CLOSED' },
-    { country: '🇩🇪 DE', name: 'DAX', price: '18,340.80', chg: '+45.20', pct: '+0.25%', status: 'CLOSED' },
-    { country: '🇯🇵 JP', name: 'NIKKEI 225', price: '38,820.00', chg: '-140.20', pct: '-0.36%', status: 'CLOSED' },
-    { country: '🇭🇰 HK', name: 'HANG SENG', price: '17,540.20', chg: '+182.30', pct: '+1.05%', status: 'CLOSED' },
-    { country: '🇸🇬 SG', name: 'GIFT NIFTY', price: '24,015.00', chg: '+22.00', pct: '+0.09%', status: 'LIVE' },
-  ];
+  const recs = useMemo(() => stocks.slice(3, 6).map((s) => ({
+    ...s, entryLo: s.price * 0.995, entryHi: s.price * 1.005, sl: s.price * 0.97, tgt: s.price * 1.05,
+  })), [stocks]);
 
-  const topGainersList = [
-    { symbol: 'ADANIENT', name: 'Adani Enterprises Ltd', price: '2,340.00', chg: '+78.10', pct: '+3.45%', volume: '4.2M', mcap: '2,66,420 Cr', tvSymbol: 'NSE:ADANIENT' },
-    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', price: '1,623.55', chg: '+33.40', pct: '+2.10%', volume: '12.8M', mcap: '12,35,100 Cr', tvSymbol: 'NSE:HDFCBANK' },
-    { symbol: 'RELIANCE', name: 'Reliance Industries Ltd', price: '2,847.30', chg: '+34.80', pct: '+1.24%', volume: '8.5M', mcap: '19,26,400 Cr', tvSymbol: 'NSE:RELIANCE' },
-    { symbol: 'SBIN', name: 'State Bank of India', price: '840.15', chg: '+9.55', pct: '+1.15%', volume: '11.4M', mcap: '7,49,800 Cr', tvSymbol: 'NSE:SBIN' },
-    { symbol: 'TCS', name: 'Tata Consultancy Services', price: '3,921.15', chg: '+33.80', pct: '+0.87%', volume: '2.1M', mcap: '14,18,200 Cr', tvSymbol: 'NSE:TCS' },
-  ];
+  const pocketList = stocks.filter((s) => s.price < pocket).sort((a, b) => a.price - b.price).slice(0, 5);
 
-  const topLosersList = [
-    { symbol: 'TATAMOTORS', name: 'Tata Motors Ltd', price: '942.10', chg: '-12.40', pct: '-1.30%', volume: '9.2M', mcap: '3,12,400 Cr', tvSymbol: 'NSE:TATAMOTORS' },
-    { symbol: 'TECHM', name: 'Tech Mahindra Ltd', price: '1,280.40', chg: '-14.20', pct: '-1.10%', volume: '1.8M', mcap: '1,25,100 Cr', tvSymbol: 'NSE:TECHM' },
-    { symbol: 'WIPRO', name: 'Wipro Limited', price: '478.90', chg: '-4.95', pct: '-1.02%', volume: '5.4M', mcap: '2,50,400 Cr', tvSymbol: 'NSE:WIPRO' },
-    { symbol: 'INFY', name: 'Infosys Limited', price: '1,456.80', chg: '-6.30', pct: '-0.43%', volume: '6.1M', mcap: '6,05,200 Cr', tvSymbol: 'NSE:INFY' },
-    { symbol: 'SUNPHARMA', name: 'Sun Pharma Ltd', price: '1,520.00', chg: '-6.80', pct: '-0.45%', volume: '3.1M', mcap: '3,64,800 Cr', tvSymbol: 'NSE:SUNPHARMA' },
-  ];
+  const gaugePos = ch && ch.high > ch.low ? ((ch.close - ch.low) / (ch.high - ch.low)) * 100 : 50;
+  const up = cur ? cur.change >= 0 : true;
+  const pts = ch?.points || [];
+  const vals = pts.map((p) => p.v);
+  const ymin = vals.length ? Math.min(...vals) : 0, ymax = vals.length ? Math.max(...vals) : 1;
 
-  const mostActiveList = [
-    { symbol: 'SUZLON', name: 'Suzlon Energy Ltd', price: '57.03', chg: '+1.20', pct: '+2.15%', volume: '48.2M', mcap: '77,800 Cr', tvSymbol: 'NSE:SUZLON' },
-    { symbol: 'YESBANK', name: 'Yes Bank Limited', price: '24.15', chg: '+0.45', pct: '+1.90%', volume: '54.0M', mcap: '75,600 Cr', tvSymbol: 'NSE:YESBANK' },
-    { symbol: 'IRFC', name: 'Indian Railway Finance', price: '178.40', chg: '+3.10', pct: '+1.77%', volume: '32.1M', mcap: '2,33,100 Cr', tvSymbol: 'NSE:IRFC' },
-    { symbol: 'PNB', name: 'Punjab National Bank', price: '118.20', chg: '-0.80', pct: '-0.67%', volume: '28.4M', mcap: '1,30,200 Cr', tvSymbol: 'NSE:PNB' },
-    { symbol: 'TATASTEEL', name: 'Tata Steel Limited', price: '164.20', chg: '+2.10', pct: '+1.30%', volume: '22.8M', mcap: '2,05,400 Cr', tvSymbol: 'NSE:TATASTEEL' },
-  ];
-
-  const currentMoversData = moversTab === 'GAINERS' ? topGainersList : moversTab === 'LOSERS' ? topLosersList : mostActiveList;
-
-  const sectorsTable = [
-    { name: 'NIFTY BANK', pct: '+1.24%', isUp: true, topStock: 'HDFCBANK (+2.10%)' },
-    { name: 'NIFTY AUTO', pct: '+0.92%', isUp: true, topStock: 'TATAMOTORS (-1.30%)' },
-    { name: 'NIFTY METAL', pct: '+0.65%', isUp: true, topStock: 'TATASTEEL (+1.30%)' },
-    { name: 'NIFTY OIL & GAS', pct: '+0.48%', isUp: true, topStock: 'RELIANCE (+1.24%)' },
-    { name: 'NIFTY FMCG', pct: '+0.15%', isUp: true, topStock: 'ITC (+0.45%)' },
-    { name: 'NIFTY PHARMA', pct: '-0.22%', isUp: false, topStock: 'SUNPHARMA (-0.45%)' },
-    { name: 'NIFTY REALTY', pct: '-0.54%', isUp: false, topStock: 'DLF (-1.10%)' },
-    { name: 'NIFTY IT', pct: '-0.88%', isUp: false, topStock: 'TCS (+0.87%)' },
-  ];
-
-  const ipoTableData = {
-    CURRENT: [
-      { name: 'INDO-MIM LTD', type: 'MAINBOARD', date: '27 Jul 2026', minLot: '₹13,830', sub: '0.65x' },
-      { name: 'LOHIA CORP LTD', type: 'MAINBOARD', date: '27 Jul 2026', minLot: '₹14,140', sub: '0.18x' },
-    ],
-    UPCOMING: [
-      { name: 'SWIGGY LIMITED', type: 'MAINBOARD', date: '12 Aug 2026', minLot: '₹14,500', sub: 'Pending' },
-      { name: 'NTPC GREEN ENERGY', type: 'MAINBOARD', date: '18 Aug 2026', minLot: '₹14,200', sub: 'Pending' }
-    ],
-    RECENT: [
-      { name: 'BAJAJ HOUSING FIN', type: 'MAINBOARD', date: '20 Jul 2026', minLot: '₹14,000', sub: '+114.2% Listing' },
-    ]
-  };
-
-  const marketNewsData = [
-    { headline: 'Reliance Industries Q1 Net Profit rises 5.8% YoY to ₹17,448 Cr; Jio ARPU at ₹182', source: 'StockFinder Terminal', time: '10m ago' },
-    { headline: 'RBI Monetary Policy Committee maintains Repo Rate unchanged at 6.50%', source: 'Bloomberg', time: '35m ago' },
-    { headline: 'Government cuts windfall tax on crude petroleum production to ₹4,600 per tonne', source: 'Reuters', time: '1h ago' },
-    { headline: 'US Federal Reserve hints at potential rate cut in upcoming September meeting', source: 'CNBC', time: '2h ago' },
-  ];
-
-  const economicCalendarEvents = [
-    { event: 'TCS Q1 Earnings Call & Margin Guidance', date: '31 Jul 2026, 16:00', impact: 'HIGH' },
-    { event: 'India CPI Inflation Rate YoY', date: '12 Aug 2026, 17:30', impact: 'HIGH' },
-    { event: 'US Non-Farm Payrolls & Unemployment', date: '07 Aug 2026, 18:00', impact: 'HIGH' },
-    { event: 'RBI MPC Policy Minutes Release', date: '22 Aug 2026, 17:00', impact: 'MEDIUM' },
-  ];
-
-  // -------------------------------------------------------------
-  // NEW SECTIONS DATA (EXTENSIONS)
-  // -------------------------------------------------------------
-  const trendingStocks12 = [
-    { symbol: 'HAL', name: 'Hindustan Aeronautics', price: '4,820.50', pct: '+4.15%', logo: '🛩️', tvSymbol: 'NSE:HAL', spark: [30, 45, 60, 75, 90] },
-    { symbol: 'BEL', name: 'Bharat Electronics', price: '312.40', pct: '+3.80%', logo: '🛡️', tvSymbol: 'NSE:BEL', spark: [40, 50, 65, 78, 88] },
-    { symbol: 'CGPOWER', name: 'CG Power & Ind', price: '946.25', pct: '+3.45%', logo: '⚡', tvSymbol: 'NSE:CGPOWER', spark: [35, 48, 62, 70, 85] },
-    { symbol: 'TRENT', name: 'Trent Limited', price: '5,420.00', pct: '+3.12%', logo: '🛍️', tvSymbol: 'NSE:TRENT', spark: [50, 58, 68, 74, 82] },
-    { symbol: 'ZOMATO', name: 'Zomato Limited', price: '234.15', pct: '+2.85%', logo: '🍟', tvSymbol: 'NSE:ZOMATO', spark: [25, 40, 55, 70, 80] },
-    { symbol: 'DIXON', name: 'Dixon Tech India', price: '12,450.00', pct: '+2.60%', logo: '📺', tvSymbol: 'NSE:DIXON', spark: [45, 52, 60, 72, 86] },
-    { symbol: 'MAZDOCK', name: 'Mazagon Dock Ship', price: '4,320.00', pct: '+2.45%', logo: '⚓', tvSymbol: 'NSE:MAZDOCK', spark: [30, 42, 58, 68, 79] },
-    { symbol: 'BHEL', name: 'Bharat Heavy Elec', price: '318.90', pct: '+2.10%', logo: '🏭', tvSymbol: 'NSE:BHEL', spark: [40, 48, 56, 68, 75] },
-    { symbol: 'COALINDIA', name: 'Coal India Ltd', price: '488.30', pct: '+1.95%', logo: '⛏️', tvSymbol: 'NSE:COALINDIA', spark: [50, 54, 62, 70, 78] },
-    { symbol: 'IOC', name: 'Indian Oil Corp', price: '174.50', pct: '+1.78%', logo: '⛽', tvSymbol: 'NSE:IOC', spark: [35, 45, 55, 62, 72] },
-    { symbol: 'PFC', name: 'Power Fin Corp', price: '522.10', pct: '+1.62%', logo: '🏦', tvSymbol: 'NSE:PFC', spark: [42, 50, 60, 68, 74] },
-    { symbol: 'RECLTD', name: 'REC Limited', price: '612.40', pct: '+1.45%', logo: '💡', tvSymbol: 'NSE:RECLTD', spark: [38, 46, 58, 64, 70] },
-  ];
-
-  const fiiDiiData = [
-    { date: '31 Jul 2026', inst: 'FII / FPI', buy: '14,820.40', sell: '12,450.10', net: '+2,370.30', isNetPos: true },
-    { date: '31 Jul 2026', inst: 'DII (Domestic)', buy: '9,450.80', sell: '8,120.20', net: '+1,330.60', isNetPos: true },
-    { date: '30 Jul 2026', inst: 'FII / FPI', buy: '11,200.00', sell: '13,100.50', net: '-1,900.50', isNetPos: false },
-    { date: '30 Jul 2026', inst: 'DII (Domestic)', buy: '10,800.20', sell: '8,400.00', net: '+2,400.20', isNetPos: true },
-  ];
-
-  const optionsChainSnapshot = [
-    { index: 'NIFTY 50', pcr: '1.18', maxPain: '24,000', highestCallOI: '24,200 (1.2M)', highestPutOI: '23,800 (1.5M)', sentiment: 'BULLISH' },
-    { index: 'BANKNIFTY', pcr: '0.94', maxPain: '51,000', highestCallOI: '51,500 (880K)', highestPutOI: '50,500 (920K)', sentiment: 'NEUTRAL' },
-    { index: 'FINNIFTY', pcr: '1.05', maxPain: '22,800', highestCallOI: '23,000 (420K)', highestPutOI: '22,500 (510K)', sentiment: 'MILD BULLISH' },
-  ];
-
-  const volumeBreakouts = [
-    { stock: 'COCHINSHIP', sector: 'Defense', vol: '14.2M', volChg: '+340%', price: '2,340.00', signal: 'BULLISH SURGE' },
-    { stock: 'MCX', sector: 'Fintech', vol: '6.8M', volChg: '+210%', price: '3,890.50', signal: 'VOLUME BREAKOUT' },
-    { symbol: 'HUDCO', sector: 'Realty / Infra', vol: '22.1M', volChg: '+185%', price: '284.10', signal: 'HIGH MOMENTUM' },
-    { stock: 'RVNL', sector: 'Railways', vol: '38.4M', volChg: '+160%', price: '588.20', signal: 'ACCUMULATION' },
-  ];
-
-  const weekHighs = [
-    { symbol: 'TRENT', price: '5,420.00', pct: '+3.12%', high: '5,450.00' },
-    { symbol: 'BHARTIARTL', price: '1,480.20', pct: '+1.45%', high: '1,485.00' },
-    { symbol: 'MAZDOCK', price: '4,320.00', pct: '+2.45%', high: '4,360.00' },
-    { symbol: 'DIXON', price: '12,450.00', pct: '+2.60%', high: '12,500.00' },
-    { symbol: 'CGPOWER', price: '946.25', pct: '+3.45%', high: '952.00' },
-  ];
-
-  const weekLows = [
-    { symbol: 'ZEEL', price: '128.40', pct: '-2.15%', low: '126.00' },
-    { symbol: 'INDUSINDBK', price: '1,380.00', pct: '-1.80%', low: '1,375.00' },
-    { symbol: 'BANDHANBNK', price: '182.50', pct: '-1.40%', low: '180.20' },
-    { symbol: 'PAYTM', price: '345.10', pct: '-0.95%', low: '340.00' },
-    { symbol: 'JUBLFOOD', price: '462.00', pct: '-0.85%', low: '458.00' },
-  ];
-
-  const upcomingEarnings = [
-    { company: 'State Bank of India (SBIN)', eps: '₹22.40', date: '02 Aug 2026', session: 'POST MARKET' },
-    { company: 'Bharti Airtel (BHARTIARTL)', eps: '₹12.80', date: '05 Aug 2026', session: 'PRE MARKET' },
-    { company: 'Larsen & Toubro (LT)', eps: '₹34.10', date: '08 Aug 2026', session: 'POST MARKET' },
-    { company: 'Tata Motors (TATAMOTORS)', eps: '₹18.50', date: '10 Aug 2026', session: 'INTRADAY' },
-  ];
-
-  const dividendCalendar = [
-    { company: 'TCS', div: '₹10.00 / share', exDate: '05 Aug 2026', recordDate: '06 Aug 2026' },
-    { company: 'Infosys', div: '₹20.00 / share', exDate: '08 Aug 2026', recordDate: '09 Aug 2026' },
-    { company: 'HDFC Bank', div: '₹19.50 / share', exDate: '12 Aug 2026', recordDate: '13 Aug 2026' },
-  ];
-
-  const bonusSplitCalendar = [
-    { company: 'HPCL', type: 'BONUS 1:1', exDate: '14 Aug 2026', status: 'UPCOMING' },
-    { company: 'IRFC', type: 'SPLIT 1:5', exDate: '20 Aug 2026', status: 'APPROVED' },
-    { company: 'PERSISTENT', type: 'SPLIT 1:2', exDate: '28 Aug 2026', status: 'ANNOUNCED' },
-  ];
-
-  const mutualFundHighlights = [
-    { name: 'Quant Active Fund Direct-Growth', ret3Y: '+32.4%', nav: '₹684.20', risk: 'VERY HIGH' },
-    { name: 'Parag Parikh Flexi Cap Direct', ret3Y: '+24.8%', nav: '₹82.15', risk: 'VERY HIGH' },
-    { name: 'Nippon India Small Cap Direct', ret3Y: '+38.2%', nav: '₹184.50', risk: 'VERY HIGH' },
-    { name: 'ICICI Pru Equity & Debt Direct', ret3Y: '+21.5%', nav: '₹340.10', risk: 'MODERATE' },
-  ];
-
-  const etfMarket = [
-    { symbol: 'NIPPON INDIA NIFTY BEES', price: '262.40', pct: '+0.52%', vol: '12.4M' },
-    { symbol: 'SBI BANK ETF', price: '528.10', pct: '+0.76%', vol: '8.2M' },
-    { symbol: 'ICICI PRU SILVER ETF', price: '84.20', pct: '-0.16%', vol: '5.1M' },
-    { symbol: 'GOLDBEES', price: '64.80', pct: '+0.44%', vol: '9.8M' },
-  ];
-
-  const commodityMarket = [
-    { symbol: 'GOLD 10g', price: '72,840', pct: '+0.44%', high: '73,100', low: '72,500' },
-    { symbol: 'SILVER 1kg', price: '86,450', pct: '-0.16%', high: '87,200', low: '86,100' },
-    { symbol: 'CRUDE OIL', price: '6,420', pct: '+0.71%', high: '6,480', low: '6,380' },
-    { symbol: 'NATURAL GAS', price: '184.20', pct: '-1.45%', high: '188.00', low: '182.10' },
-    { symbol: 'COPPER', price: '785.40', pct: '+0.88%', high: '790.00', low: '780.20' },
-  ];
-
-  const currencyMarket = [
-    { pair: 'USD / INR', price: '83.74', pct: '-0.10%', high: '83.85', low: '83.68' },
-    { pair: 'EUR / INR', price: '91.20', pct: '+0.22%', high: '91.45', low: '90.95' },
-    { pair: 'GBP / INR', price: '107.80', pct: '+0.35%', high: '108.10', low: '107.40' },
-    { pair: 'JPY / INR (100)', price: '54.20', pct: '-0.45%', high: '54.60', low: '54.10' },
-  ];
-
-  const cryptoMarket = [
-    { coin: 'Bitcoin (BTC)', price: '$66,840.00', pct: '+1.89%', vol: '$28.4B' },
-    { coin: 'Ethereum (ETH)', price: '$3,480.20', pct: '+2.48%', vol: '$14.2B' },
-    { coin: 'Binance Coin (BNB)', price: '$584.10', pct: '+0.92%', vol: '$1.8B' },
-    { coin: 'Solana (SOL)', price: '$184.50', pct: '+5.12%', vol: '$4.2B' },
-  ];
-
-  const recentlyViewed = [
-    { symbol: 'RELIANCE', price: '2,847.30', pct: '+1.24%' },
-    { symbol: 'TCS', price: '3,921.15', pct: '+0.87%' },
-    { symbol: 'HDFCBANK', price: '1,623.55', pct: '+2.10%' },
-    { symbol: 'INFY', price: '1,456.80', pct: '-0.43%' },
-    { symbol: 'TATAMOTORS', price: '942.10', pct: '-1.30%' },
-  ];
-
-  const aiRecommendations = [
-    { symbol: 'CGPOWER', reason: 'Bullish Momentum • Golden Cross Breakout', target: '₹1,020', risk: 'LOW' },
-    { symbol: 'HAL', reason: 'Defense Sector Allocation • Institutional Inflows', target: '₹5,200', risk: 'MODERATE' },
-    { symbol: 'COCHINSHIP', reason: 'High Volume Expansion • Orderbook Spike', target: '₹2,600', risk: 'MODERATE' },
-  ];
-
-  const learningArticles = [
-    { title: 'Understanding Option Chain PCR & Max Pain for Day Trading', time: '5 min read', category: 'DERIVATIVES' },
-    { title: 'How FII/DII Institutional Data Influences Opening Gaps', time: '7 min read', category: 'MACRO' },
-    { title: 'Volume Spread Analysis (VSA): Spotting Smart Money Accumulation', time: '6 min read', category: 'TECHNICALS' },
-  ];
+  const StockCard = ({ s }) => (
+    <div className="ao-sc" onClick={() => go(s.symbol)}>
+      <Acts sym={s.symbol} /><b>{s.symbol}</b><span>{s.name}</span>
+      <div>₹{inr(s.price)} <span style={{ display: "inline" }} className={s.pct >= 0 ? "ao-up" : "ao-dn"}>{s.pct >= 0 ? "▲" : "▼"} {s.change >= 0 ? "+" : ""}{s.change.toFixed(2)} ({pct(s.pct)})</span></div>
+    </div>
+  );
+  const MRow = ({ s }) => (
+    <tr className="r" onClick={() => go(s.symbol)}>
+      <td><b>{s.symbol}</b><small>{s.name}</small></td>
+      <td className={s.pct >= 0 ? "ao-up" : "ao-dn"}><span className="ao-val">₹{inr(s.price)} {s.pct >= 0 ? "▲" : "▼"}</span><Acts sym={s.symbol} /></td>
+      <td>{s.change >= 0 ? "" : "-"}{inr(Math.abs(s.change))}</td>
+      <td><span className={"ao-chip " + (s.pct >= 0 ? "u" : "d")}>{pct(s.pct)}</span></td>
+    </tr>
+  );
+  const MHead = () => <thead><tr><th>Stock</th><th>LTP</th><th>Chng</th><th>%Chng</th></tr></thead>;
+  const Empty = ({ t }) => <div className="ao-empty">{status === "loading" ? "Loading…" : t}</div>;
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-slate-200 font-sans pb-12 selection:bg-blue-600 selection:text-white">
-      
-      {/* 1. NAVBAR */}
+    <div className="ao">
+      <style>{css}</style>
       <Navbar />
-
-      {/* 2. REAL-TIME SCROLLING MARKET TICKER */}
-      <div className="bg-[#0E1320] border-b border-slate-800/80 h-9 overflow-hidden flex items-center select-none text-xs font-mono">
-        <div className="bg-[#131927] border-r border-slate-800 px-3 h-full flex items-center gap-1.5 font-bold text-[10px] text-emerald-400 shrink-0 uppercase tracking-wider z-10">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span>MARKET TICKER</span>
-        </div>
-
-        <div className="flex items-center gap-6 overflow-x-auto no-scrollbar whitespace-nowrap px-4">
-          {[...liveTickerItems, ...liveTickerItems].map((item, idx) => (
-            <div 
-              key={idx} 
-              onClick={() => setActiveChartSymbol(item.tvSymbol)}
-              className="flex items-center gap-2 cursor-pointer hover:text-white transition-colors shrink-0"
-            >
-              <span className="font-semibold text-slate-300">{item.name}</span>
-              <span className="font-bold text-white">₹{item.price}</span>
-              <span className={`font-bold text-[11px] ${item.up ? 'text-emerald-400' : 'text-red-400'}`}>
-                {item.up ? '▲' : '▼'} {item.pct}
-              </span>
-              <span className="text-slate-700 mx-1">|</span>
-            </div>
+      <OrderModal open={!!order} sym={order?.sym} name={order?.name} side={order?.side} ltp={order?.ltp} onClose={() => setOrder(null)} />
+      <div className="ao-w">
+        <div className="ao-sub">
+          {["Stock Discovery", "Index F&O", "Stocks F&O", "Commodities", "All Indices", "News"].map((t) => (
+            <button key={t} className={sub === t ? "on" : ""} onClick={() => setSub(t)}>{t}</button>
           ))}
         </div>
-      </div>
 
-      {/* 3. MAIN WORKSPACE CONTAINER */}
-      <main className="max-w-[1600px] mx-auto px-2 sm:px-4 pt-3 space-y-4">
-        
-        {/* ================= EXISTING SECTION A: FULL-WIDTH TRADINGVIEW CHART ================= */}
-        <section className={`bg-[#0B0F19] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl ${isChartFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''}`}>
-          <div className="bg-[#131927] border-b border-slate-800 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-3">
-              <span className="font-black text-white text-sm tracking-tight">{activeChartSymbol}</span>
-              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800/60 px-2 py-0.5 rounded">
-                ● LIVE NSE/BSE
-              </span>
+        {/* TradingView — unchanged */}
+        <TVChart symbol={tv} onSymbol={setTv} />
 
-              <div className="hidden lg:flex items-center gap-1 border-l border-slate-800 pl-3">
-                {['NSE:NIFTY', 'BSE:SENSEX', 'NSE:BANKNIFTY', 'NSE:RELIANCE', 'NSE:HDFCBANK', 'NSE:TCS'].map((sym) => (
-                  <button
-                    key={sym}
-                    onClick={() => setActiveChartSymbol(sym)}
-                    className={`px-2 py-0.5 rounded font-mono text-[10px] transition-colors cursor-pointer ${
-                      activeChartSymbol === sym ? 'bg-blue-600 text-white font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    {sym.replace('NSE:', '').replace('BSE:', '')}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1 font-mono text-[11px]">
-              {[
-                { label: '1m', val: '1' },
-                { label: '5m', val: '5' },
-                { label: '15m', val: '15' },
-                { label: '1H', val: '60' },
-                { label: '4H', val: '240' },
-                { label: '1D', val: 'D' },
-                { label: '1W', val: 'W' },
-                { label: '1M', val: 'M' },
-              ].map((tf) => (
-                <button
-                  key={tf.val}
-                  onClick={() => setActiveTimeframe(tf.val)}
-                  className={`px-2 py-1 rounded transition-all cursor-pointer ${
-                    activeTimeframe === tf.val ? 'bg-slate-800 text-blue-400 font-bold border border-blue-500/40' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {tf.label}
-                </button>
-              ))}
-
-              <button
-                onClick={() => setIsChartFullscreen(!isChartFullscreen)}
-                className="ml-2 p-1 text-slate-400 hover:text-white border border-slate-800 rounded bg-[#0E1320] cursor-pointer"
-                title="Toggle Fullscreen"
-              >
-                {isChartFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+        {sub === "Stock Discovery" && (
+          <>
+        {/* INDEX OVERVIEW */}
+        <section className="ao-card">
+          <h2 className="ao-t">Index Overview</h2>
+          <div className="ao-itabs">
+            {indices.slice(0, 6).map((x) => (
+              <button key={x.key} className={"ao-it" + (ikey === x.key ? " on" : "")} onClick={() => { setIkey(x.key); if (IDX_TV[x.key]) setTv(IDX_TV[x.key]); }}>
+                <b>{x.name}</b>
+                <div className="v">{inr(x.value)} <span className={x.change >= 0 ? "ao-up" : "ao-dn"}>{x.change >= 0 ? "▲" : "▼"} {x.change >= 0 ? "+" : ""}{inr(x.change)} ({pct(x.pct)})</span></div>
               </button>
-            </div>
+            ))}
+            <button className="ao-va" onClick={() => navigate("/tradeone", { state: { tv: IDX_TV[ikey] || "BSE:NIFTYBEES", label: ikey } })}>VIEW ALL ›</button>
           </div>
-
-          <div className="w-full h-[520px] bg-[#0B0F19] relative">
-            <div id="tradingview_markets_chart" ref={tvContainerRef} className="w-full h-full" />
+          <div className="ao-ov">
+            <div>
+              <div style={{ fontWeight: 600 }}>Day's High/Low</div>
+              <div className="ao-gauge"><i style={{ left: gaugePos + "%" }} /></div>
+              <div className="ao-row" style={{ fontWeight: 600 }}><span>{ch ? inr(ch.low) : "—"}</span><span>{ch ? inr(ch.high) : "—"}</span></div>
+              <div className="ao-row" style={{ color: "#787b86", fontSize: 11 }}><span>Low</span><span>High</span></div>
+              <div className="ao-4">
+                <div><small>Open</small>{ch ? inr(ch.open) : "—"}</div>
+                <div><small>High</small><span className="ao-up">{ch ? inr(ch.high) : "—"}</span></div>
+                <div><small>Low</small><span className="ao-dn">{ch ? inr(ch.low) : "—"}</span></div>
+                <div><small>Close</small>{ch ? inr(ch.prev_close) : "—"}</div>
+              </div>
+            </div>
+            <div>
+              <div style={{ height: 190 }}>
+                {pts.length > 1 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={pts} margin={{ top: 6, right: 4, left: 0, bottom: 0 }}>
+                      <defs><linearGradient id="aog" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={up ? "#00b386" : "#e5314a"} stopOpacity={0.45} />
+                        <stop offset="100%" stopColor={up ? "#00b386" : "#e5314a"} stopOpacity={0} />
+                      </linearGradient></defs>
+                      <XAxis dataKey="t" hide />
+                      <YAxis orientation="right" domain={[ymin * 0.9995, ymax * 1.0005]} tick={{ fill: "#787b86", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => v.toFixed(0)} width={52} />
+                      {ch?.prev_close && range === "1d" && <ReferenceLine y={ch.prev_close} stroke="#555" strokeDasharray="3 3" />}
+                      <Tooltip contentStyle={{ background: "#182033", border: "1px solid #1e293b", fontSize: 12 }} labelStyle={{ color: "#787b86" }} formatter={(v) => [inr(v), "Value"]} />
+                      <Area type="monotone" dataKey="v" stroke={up ? "#00b386" : "#e5314a"} strokeWidth={1.6} fill="url(#aog)" dot={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="ao-empty" style={{ paddingTop: 70 }}>{err ? "Chart needs the updated backend (markets_api.py)" : "Loading chart…"}</div>
+                )}
+              </div>
+              <div className="ao-pills">
+                {RANGES.map(([k, l]) => <button key={k} className={"ao-pill" + (range === k ? " on" : "")} onClick={() => setRange(k)}>{l}</button>)}
+              </div>
+            </div>
           </div>
         </section>
 
-        {/* ================= EXISTING SECTION B: COMPACT DATA MATRIX ================= */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-          
-          {/* COLUMN 1: INDICES & GLOBAL MARKETS */}
-          <div className="lg:col-span-4 space-y-3">
-            <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2 text-xs font-bold text-white">
-                <span>BENCHMARK INDICES</span>
-                <span className="text-[10px] font-mono text-slate-500">REALTIME</span>
-              </div>
+        {/* MOST BOUGHT */}
+        <section className="ao-card">
+          <div className="ao-row"><h2 className="ao-t">Most Bought Stocks</h2><button className="ao-va" onClick={() => navigate("/screener")}>VIEW ALL ›</button></div>
+          <div className="ao-5">{mostBought.map((s) => <StockCard key={s.symbol} s={s} />)}</div>
+          {!mostBought.length && <Empty t="No data" />}
+        </section>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left font-mono text-xs">
-                  <thead>
-                    <tr className="text-slate-500 text-[10px] border-b border-slate-800/60 uppercase">
-                      <th className="pb-1.5">Index</th>
-                      <th className="pb-1.5 text-right">Last</th>
-                      <th className="pb-1.5 text-right">Chg (%)</th>
-                      <th className="pb-1.5 text-right">High / Low</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40">
-                    {marketIndicesTable.map((idx) => (
-                      <tr 
-                        key={idx.name}
-                        onClick={() => setActiveChartSymbol(idx.tvSymbol)}
-                        className="hover:bg-slate-800/40 cursor-pointer transition-colors"
-                      >
-                        <td className="py-1.5 font-bold text-blue-400">{idx.name}</td>
-                        <td className="py-1.5 text-right font-bold text-white">₹{idx.price}</td>
-                        <td className={`py-1.5 text-right font-bold ${idx.pct?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {idx.pct}
-                        </td>
-                        <td className="py-1.5 text-right text-[10px] text-slate-500">{idx.high}/{idx.low}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        {/* TOP MOVERS + SECTORWISE */}
+        <section className="ao-card">
+          <h2 className="ao-t">Top Movers and Sectorwise Movements</h2>
+          <div className="ao-2">
+            <div>
+              <div className="ao-tabs">
+                <button className={"ao-tab" + (mv === "gain" ? " on" : "")} onClick={() => setMv("gain")}>Gainers</button>
+                <button className={"ao-tab" + (mv === "lose" ? " on" : "")} onClick={() => setMv("lose")}>Losers</button>
               </div>
+              <table className="ao-tbl"><MHead /><tbody>{movers.map((s) => <MRow key={s.symbol} s={s} />)}</tbody></table>
+              {!movers.length && <Empty t="No data" />}
             </div>
-
-            <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2 text-xs font-bold text-white">
-                <span>GLOBAL MARKETS</span>
-                <span className="text-[10px] font-mono text-slate-500">CORRELATIONS</span>
+            <div>
+              <div className="ao-tabs" style={{ flexWrap: "wrap" }}>
+                {sectors.slice(0, 5).map((n) => <button key={n} className={"ao-tab" + (sec === n ? " on" : "")} onClick={() => setSector(n)}>{n}</button>)}
               </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left font-mono text-xs">
-                  <thead>
-                    <tr className="text-slate-500 text-[10px] border-b border-slate-800/60 uppercase">
-                      <th className="pb-1.5">Index</th>
-                      <th className="pb-1.5 text-right">Last</th>
-                      <th className="pb-1.5 text-right">Chg (%)</th>
-                      <th className="pb-1.5 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40">
-                    {globalMarketsTable.map((g) => (
-                      <tr key={g.name} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="py-1.5 font-bold text-slate-300">{g.country} {g.name}</td>
-                        <td className="py-1.5 text-right font-bold text-white">₹{g.price}</td>
-                        <td className={`py-1.5 text-right font-bold ${g.pct?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {g.pct}
-                        </td>
-                        <td className="py-1.5 text-right text-[9px]">
-                          <span className={`px-1.5 py-0.5 rounded ${g.status === 'LIVE' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 text-slate-500'}`}>
-                            {g.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <table className="ao-tbl"><MHead /><tbody>{secRows.map((s) => <MRow key={s.symbol} s={s} />)}</tbody></table>
+              {!secRows.length && <Empty t="No data" />}
             </div>
           </div>
+        </section>
 
-          {/* COLUMN 2: TOP MOVERS & HEATMAP */}
-          <div className="lg:col-span-5 space-y-3">
-            <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs">
-                <span className="font-bold text-white">MARKET MOVERS</span>
+        {/* TECHNICAL SCREENERS */}
+        <section className="ao-card">
+          <div className="ao-row" style={{ marginBottom: 14, flexWrap: "wrap" }}>
+            <div className="ao-tabs" style={{ margin: 0 }}>
+              {[["pivot", "Simple Pivot"], ["high", "Near Day High"], ["low", "Near Day Low"]].map(([k, l]) => (
+                <button key={k} className={"ao-tab" + (tech === k ? " on" : "")} onClick={() => setTech(k)}>{l}</button>
+              ))}
+            </div>
+            <span style={{ color: "#787b86", fontSize: 12 }}>Tracked stocks · {tech === "pivot" ? "Above pivot" : tech === "high" ? "Strength" : "Weakness"}</span>
+          </div>
+          <div className="ao-5">{techList.map((s) => <StockCard key={s.symbol} s={s} />)}</div>
+          {!techList.length && <Empty t="No stocks match right now" />}
+        </section>
 
-                <div className="flex items-center gap-1 font-mono text-[10px]">
-                  {['GAINERS', 'LOSERS', 'ACTIVE'].map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setMoversTab(tab)}
-                      className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
-                        moversTab === tab ? 'bg-blue-600 text-white font-bold' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {tab}
-                    </button>
-                  ))}
+        {/* TRADING SIGNALS */}
+        <section className="ao-card">
+          <div className="ao-row"><h2 className="ao-t">Trading Signals</h2><button className="ao-va" onClick={() => navigate("/screener")}>VIEW ALL ›</button></div>
+          <div className="ao-tabs">
+            {["Candlesticks", "Chart Patterns", "Price Action"].map((t) => <button key={t} className={"ao-tab" + (sigTab === t ? " on" : "")} onClick={() => setSigTab(t)}>{t}</button>)}
+          </div>
+          <div className="ao-3">
+            {signals.map((s) => {
+              const col = s.pct >= 0 ? "#00b386" : "#e5314a";
+              const y = (p) => 4 + (1 - (p - s.low) / (s.high - s.low || 1)) * 46;
+              return (
+                <div className="ao-sig" key={s.symbol} onClick={() => go(s.symbol)} style={{ cursor: "pointer" }}>
+                  <div style={{ textAlign: "center", width: 74 }}>
+                    <svg width="30" height="56"><line x1="15" x2="15" y1={4} y2={52} stroke={col} /><rect x="9" width="12" y={Math.min(y(s.prev), y(s.price))} height={Math.max(3, Math.abs(y(s.prev) - y(s.price)))} fill={col} /></svg>
+                    <div style={{ fontSize: 10, color: "#787b86" }}>{s.label}</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="ao-row"><b>{s.symbol}</b><span className={s.pct >= 0 ? "ao-up" : "ao-dn"}>₹{inr(s.price)}</span></div>
+                    <div className="ao-row"><span style={{ color: "#787b86", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span><span className={s.pct >= 0 ? "ao-up" : "ao-dn"} style={{ fontSize: 11 }}>{s.change >= 0 ? "+" : ""}{inr(s.change)} ({pct(s.pct)})</span></div>
+                    <div style={{ color: "#787b86", fontSize: 11, marginTop: 8 }}>Time Frame: 1D</div>
+                  </div>
+                  <Acts sym={s.symbol} />
+                  <div style={{ display: "none" }}>
+                  </div>
                 </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left font-mono text-xs">
-                  <thead>
-                    <tr className="text-slate-500 text-[10px] border-b border-slate-800/60 uppercase">
-                      <th className="pb-1.5">Symbol</th>
-                      <th className="pb-1.5 text-right">Price (₹)</th>
-                      <th className="pb-1.5 text-right">Chg (%)</th>
-                      <th className="pb-1.5 text-right">Volume</th>
-                      <th className="pb-1.5 text-right">Watchlist</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40">
-                    {currentMoversData.map((st) => (
-                      <tr key={st.symbol} className="hover:bg-slate-800/40 transition-colors">
-                        <td 
-                          onClick={() => setActiveChartSymbol(st.tvSymbol)}
-                          className="py-1.5 font-bold text-blue-400 cursor-pointer"
-                        >
-                          {st.symbol}
-                        </td>
-                        <td className="py-1.5 text-right font-bold text-white">₹{st.price}</td>
-                        <td className={`py-1.5 text-right font-bold ${st.pct?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {st.pct}
-                        </td>
-                        <td className="py-1.5 text-right text-slate-400">{st.volume}</td>
-                        <td className="py-1.5 text-right">
-                          <button
-                            onClick={() => toggleWatchlist(st.symbol)}
-                            className="text-slate-400 hover:text-white cursor-pointer"
-                          >
-                            {watchlist.includes(st.symbol) ? <Check className="w-3.5 h-3.5 text-emerald-400 inline" /> : <Plus className="w-3.5 h-3.5 inline" />}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-                <span>SECTOR PERFORMANCE HEATMAP</span>
-                <span className="text-[10px] font-mono text-slate-500">INTRADAY</span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-                {sectorsTable.map((sec) => (
-                  <div 
-                    key={sec.name}
-                    onClick={() => navigate('/screener')}
-                    className={`p-2 rounded border cursor-pointer ${
-                      sec.isUp ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400' : 'bg-red-950/40 border-red-800/60 text-red-400'
-                    }`}
-                  >
-                    <span className="font-bold block text-white text-[11px]">{sec.name}</span>
-                    <span className="font-black text-xs block">{sec.pct}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+              );
+            })}
           </div>
+          {!signals.length && <Empty t="No data" />}
+        </section>
 
-          {/* COLUMN 3: IPO, NEWS & CALENDAR */}
-          <div className="lg:col-span-3 space-y-3">
-            <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs">
-                <span className="font-bold text-white">PRIMARY MARKET IPOs</span>
-                <div className="flex gap-1 font-mono text-[9px]">
-                  {['CURRENT', 'UPCOMING'].map((t) => (
-                    <button 
-                      key={t}
-                      onClick={() => setIpoTab(t)}
-                      className={`px-1.5 py-0.5 rounded cursor-pointer ${ipoTab === t ? 'bg-blue-600 text-white font-bold' : 'text-slate-500'}`}
-                    >
-                      {t}
-                    </button>
-                  ))}
+        {/* RESEARCH RECOMMENDATIONS */}
+        <section className="ao-card">
+          <div className="ao-row"><h2 className="ao-t">Research Recommendations</h2><button className="ao-va" onClick={() => navigate("/screener")}>VIEW ALL TRADING IDEAS ›</button></div>
+          <div className="ao-3">
+            {recs.map((r) => {
+              const span = r.tgt - r.sl;
+              const at = Math.min(100, Math.max(0, ((r.price - r.sl) / span) * 100));
+              return (
+                <div className="ao-rec" key={r.symbol}>
+                  <div className="ao-row"><div><b>{r.symbol}</b><div style={{ color: "#787b86", fontSize: 11 }}>{r.name}</div></div>
+                    <span style={{ fontSize: 11 }} className={r.pct >= 0 ? "ao-up" : "ao-dn"}>● LTP ₹{inr(r.price)}</span></div>
+                  <div className="ao-rng"><i style={{ left: "0%", background: "#e5314a" }} /><i style={{ left: "50%", background: "#2962ff" }} /><i style={{ left: "100%", background: "#00b386" }} />
+                    <i style={{ left: at + "%", background: "#fff", width: 6, height: 6, top: -1.5 }} /></div>
+                  <div className="ao-row" style={{ fontSize: 11, color: "#787b86" }}><span>Stop Loss<br /><b style={{ color: "#d1d4dc" }}>{inr(r.sl)}</b></span><span style={{ textAlign: "center" }}>Entry<br /><b style={{ color: "#d1d4dc" }}>{inr(r.entryLo)} - {inr(r.entryHi)}</b></span><span style={{ textAlign: "right" }}>Target<br /><b style={{ color: "#d1d4dc" }}>{inr(r.tgt)}</b></span></div>
+                  <div className="ao-row" style={{ marginTop: 14 }}><span style={{ fontSize: 10, color: "#5d616d" }}>Illustrative levels · not advice</span><button className="ao-buy" onClick={(e) => trade(e, r.symbol, "BUY")}>BUY</button></div>
                 </div>
-              </div>
-
-              <div className="space-y-2 text-xs">
-                {ipoTableData[ipoTab].map((ipo, i) => (
-                  <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded flex justify-between items-center">
-                    <div>
-                      <span className="font-bold text-white block">{ipo.name}</span>
-                      <span className="text-[10px] text-slate-500">{ipo.type} • Closes {ipo.date}</span>
-                    </div>
-                    <span className="font-bold text-emerald-400 text-[11px]">{ipo.sub}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-                <span>ECONOMIC CALENDAR</span>
-                <span className="text-[10px] font-mono text-slate-500">EVENTS</span>
-              </div>
-
-              <div className="space-y-2 text-xs">
-                {economicCalendarEvents.map((e, i) => (
-                  <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded space-y-0.5">
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-slate-400 font-mono">{e.date}</span>
-                      <span className="text-red-400 font-bold">{e.impact}</span>
-                    </div>
-                    <span className="font-semibold text-white block text-[11px] leading-tight">{e.event}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-                <span>MARKET BULLETINS</span>
-                <span className="text-[10px] font-mono text-blue-400">NEWS</span>
-              </div>
-
-              <div className="space-y-2 text-xs">
-                {marketNewsData.map((n, i) => (
-                  <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded space-y-0.5">
-                    <span className="text-[9px] text-slate-500 font-mono block">{n.source} • {n.time}</span>
-                    <p className="font-semibold text-slate-200 text-[11px] leading-tight hover:text-blue-400 cursor-pointer">
-                      {n.headline}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
+              );
+            })}
           </div>
+          {!recs.length && <Empty t="No data" />}
+        </section>
 
+        {/* POCKET FRIENDLY */}
+        <section className="ao-card">
+          <div className="ao-row"><h2 className="ao-t">Pocket Friendly Stocks</h2><button className="ao-va" onClick={() => navigate("/screener")}>VIEW ALL ›</button></div>
+          <div className="ao-tabs">{[50, 100, 200].map((n) => <button key={n} className={"ao-tab" + (pocket === n ? " on" : "")} onClick={() => setPocket(n)}>{"<₹" + n}</button>)}</div>
+          <div className="ao-5">{pocketList.map((s) => <StockCard key={s.symbol} s={s} />)}</div>
+          {!pocketList.length && <Empty t={`No tracked stocks under ₹${pocket}`} />}
+        </section>
+
+        {/* CORPORATE ACTION + NEWS */}
+        <div className="ao-2">
+          <section className="ao-card">
+            <h2 className="ao-t">Corporate Action</h2>
+            <div className="ao-tabs" style={{ flexWrap: "wrap" }}>{["Split", "Board Meeting", "Bonus", "Dividend", "Rights"].map((t) => <button key={t} className={"ao-tab" + (ca === t ? " on" : "")} onClick={() => setCa(t)}>{t}</button>)}</div>
+            <table className="ao-tbl"><thead><tr><th>Company</th><th>{ca === "Dividend" ? "Amount" : "Ratio / Detail"}</th><th>Ex-Date</th></tr></thead>
+              <tbody>{(CORP[ca] || []).map((r, i) => <tr key={i}><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td></tr>)}</tbody></table>
+            <div style={{ fontSize: 10, color: "#5d616d", marginTop: 10 }}>Sample data — connect a corporate-actions API to make this live.</div>
+          </section>
+          <section className="ao-card">
+            <div className="ao-row"><h2 className="ao-t">Stocks in News</h2><button className="ao-va">VIEW ALL ›</button></div>
+            {NEWS.map((n, i) => (
+              <div className="ao-news" key={i}>
+                <small>{n.src}</small><span className="ao-tag">INSIGHTFUL</span>
+                <div style={{ fontWeight: 600, margin: "6px 0" }}>{n.t}</div>
+                <small>{n.sym} · {n.ago}</small>
+              </div>
+            ))}
+            <div style={{ fontSize: 10, color: "#5d616d", marginTop: 10 }}>Sample headlines — connect a news API to make this live.</div>
+          </section>
         </div>
 
-        {/* ========================================================================= */}
-        {/* ======================= EXTENDED TERMINAL SECTIONS ====================== */}
-        {/* ========================================================================= */}
+          </>
+        )}
 
-        {/* SECTION 1: TRENDING STOCKS (12 CARDS GRID) */}
-        <section className="bg-[#131927] border border-slate-800/80 rounded-xl p-3.5 shadow-lg space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-            <span className="flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
-              <span>TRENDING &amp; BREAKOUT EQUITIES</span>
-            </span>
-            <span className="text-[10px] font-mono text-slate-500">12 ACTIVE INSTRUMENTS</span>
-          </div>
+        {sub === "All Indices" && (
+          <section className="ao-card">
+            <h2 className="ao-t">All Indices</h2>
+            <table className="ao-tbl">
+              <thead><tr><th>Index</th><th>Value</th><th>Chng</th><th>%Chng</th><th>Open</th><th>High</th><th>Low</th><th>Day range</th><th /></tr></thead>
+              <tbody>
+                {indices.map((x) => {
+                  const d = days[x.key]; const pos = d && d.high > d.low ? ((x.value - d.low) / (d.high - d.low)) * 100 : 50;
+                  return (
+                    <tr key={x.key} className="r" onClick={() => goChart(x.key)}>
+                      <td><b>{x.name}</b></td>
+                      <td>{inr(x.value)}</td>
+                      <td className={x.change >= 0 ? "ao-up" : "ao-dn"}>{x.change >= 0 ? "+" : ""}{inr(x.change)}</td>
+                      <td><span className={"ao-chip " + (x.change >= 0 ? "u" : "d")}>{pct(x.pct)}</span></td>
+                      <td>{d ? inr(d.open) : "—"}</td><td>{d ? inr(d.high) : "—"}</td><td>{d ? inr(d.low) : "—"}</td>
+                      <td style={{ width: 130 }}><div className="ao-gauge" style={{ margin: "6px 0" }}><i style={{ left: pos + "%" }} /></div></td>
+                      <td><button className="ao-ab c" onClick={(e) => { e.stopPropagation(); goChart(x.key); }} title="Chart">📈</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!indices.length && <Empty t="No data" />}
+          </section>
+        )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-2.5">
-            {trendingStocks12.map((st) => (
-              <div key={st.symbol} className="bg-[#0E1320] border border-slate-800/90 rounded-lg p-2.5 flex flex-col justify-between hover:border-blue-500/50 transition-colors">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-base">{st.logo}</span>
-                    <span className="font-mono text-[10px] text-emerald-400 font-bold">{st.pct}</span>
+        {sub === "Index F&O" && (
+          <section className="ao-card">
+            <h2 className="ao-t">Index F&amp;O — Key Levels</h2>
+            <div className="ao-3">
+              {indices.filter((x) => STEP[x.key]).map((x) => {
+                const d = days[x.key]; const step = STEP[x.key];
+                const atm = Math.round(x.value / step) * step;
+                const lv = d ? pivot({ high: d.high, low: d.low, prev: d.prev_close }) : null;
+                const bias = lv ? (x.value > lv.P ? "Bullish above pivot" : "Bearish below pivot") : "—";
+                return (
+                  <div className="ao-rec" key={x.key} style={{ cursor: "pointer" }} onClick={() => goChart(x.key)}>
+                    <div className="ao-row"><b>{x.name}</b><span className={x.change >= 0 ? "ao-up" : "ao-dn"}>{inr(x.value)} ({pct(x.pct)})</span></div>
+                    <div className="ao-4" style={{ gridTemplateColumns: "repeat(2,1fr)", marginTop: 14 }}>
+                      <div><small>ATM Strike</small>{inr(atm)}</div>
+                      <div><small>Bias</small><span className={lv && x.value > lv.P ? "ao-up" : "ao-dn"}>{bias}</span></div>
+                      <div><small>Support (S1)</small><span className="ao-dn">{lv ? inr(lv.S1) : "—"}</span></div>
+                      <div><small>Resistance (R1)</small><span className="ao-up">{lv ? inr(lv.R1) : "—"}</span></div>
+                      <div><small>Pivot</small>{lv ? inr(lv.P) : "—"}</div>
+                      <div><small>Day range</small>{d ? `${inr(d.low)} - ${inr(d.high)}` : "—"}</div>
+                    </div>
                   </div>
-                  <span className="font-bold text-white text-xs block truncate">{st.symbol}</span>
-                  <span className="text-[10px] text-slate-400 block truncate mb-1">{st.name}</span>
-                  <span className="font-mono text-xs font-bold text-slate-200">₹{st.price}</span>
-                </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: "#5d616d", marginTop: 12 }}>Levels are calculated from the day's high, low and previous close. Options data is not included.</div>
+            {!indices.length && <Empty t="No data" />}
+          </section>
+        )}
 
-                {/* Sparkline Visual */}
-                <div className="h-4 w-full flex items-end gap-0.5 pt-1 mt-2 border-t border-slate-800/60">
-                  {st.spark.map((val, i) => (
-                    <div key={i} style={{ height: `${val}%` }} className="flex-1 bg-emerald-400/80 rounded-t-sm" />
+        {sub === "Stocks F&O" && (
+          <section className="ao-card">
+            <h2 className="ao-t">Stocks F&amp;O — Tracked Stocks</h2>
+            <div style={{ overflowX: "auto" }}>
+              <table className="ao-tbl">
+                <thead><tr><th>Stock</th><th>LTP</th><th>%Chng</th><th>Support</th><th>Pivot</th><th>Resistance</th><th>Day range</th></tr></thead>
+                <tbody>
+                  {[...stocks].sort((a, b) => b.volume * b.price - a.volume * a.price).map((s) => {
+                    const lv = pivot(s); const pos = s.high > s.low ? ((s.price - s.low) / (s.high - s.low)) * 100 : 50;
+                    return (
+                      <tr key={s.symbol} className="r" onClick={() => go(s.symbol)}>
+                        <td><b>{s.symbol}</b><small>{s.sector}</small></td>
+                        <td className={s.pct >= 0 ? "ao-up" : "ao-dn"}><span className="ao-val">₹{inr(s.price)} {s.pct >= 0 ? "▲" : "▼"}</span><Acts sym={s.symbol} /></td>
+                        <td><span className={"ao-chip " + (s.pct >= 0 ? "u" : "d")}>{pct(s.pct)}</span></td>
+                        <td className="ao-dn">{inr(lv.S1)}</td><td>{inr(lv.P)}</td><td className="ao-up">{inr(lv.R1)}</td>
+                        <td style={{ width: 120 }}><div className="ao-gauge" style={{ margin: "6px 0" }}><i style={{ left: pos + "%" }} /></div></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {!stocks.length && <Empty t="No data" />}
+          </section>
+        )}
+
+        {sub === "Commodities" && (
+          <section className="ao-card">
+            <h2 className="ao-t">Commodities &amp; Currencies</h2>
+            {com.err && !com.data && <Empty t="Needs the updated backend (markets_api.py)" />}
+            {!com.data && !com.err && <Empty t="Loading…" />}
+            {com.data && (
+              <>
+                <div className="ao-5" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+                  {com.data.items.filter((c) => c.unit !== "Currency").map((c) => (
+                    <div className="ao-sc" key={c.key}>
+                      <b>{c.name}</b><span>{c.unit}</span>
+                      <div>{inr(c.price)} <span style={{ display: "inline" }} className={c.change >= 0 ? "ao-up" : "ao-dn"}>{c.change >= 0 ? "▲" : "▼"} {c.change >= 0 ? "+" : ""}{inr(c.change)} ({pct(c.change_pct)})</span></div>
+                      <div style={{ color: "#787b86", marginTop: 6 }}>L {inr(c.low)} · H {inr(c.high)}</div>
+                    </div>
                   ))}
                 </div>
+                <table className="ao-tbl" style={{ marginTop: 18 }}>
+                  <thead><tr><th>Currency</th><th>Rate</th><th>Chng</th><th>%Chng</th></tr></thead>
+                  <tbody>{com.data.items.filter((c) => c.unit === "Currency").map((c) => (
+                    <tr key={c.key}><td><b>{c.name}</b></td><td>{inr(c.price)}</td>
+                      <td className={c.change >= 0 ? "ao-up" : "ao-dn"}>{c.change >= 0 ? "+" : ""}{c.change.toFixed(4)}</td>
+                      <td><span className={"ao-chip " + (c.change >= 0 ? "u" : "d")}>{pct(c.change_pct)}</span></td></tr>))}
+                  </tbody>
+                </table>
+                <div style={{ fontSize: 10, color: "#5d616d", marginTop: 12 }}>Global futures prices in US dollars (not MCX rupee prices). Delayed.</div>
+              </>
+            )}
+          </section>
+        )}
 
-                <div className="flex items-center gap-1 mt-2 pt-1 border-t border-slate-800/60">
-                  <button 
-                    onClick={() => toggleWatchlist(st.symbol)}
-                    className="flex-1 text-[10px] font-bold py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer transition-colors"
-                  >
-                    {watchlist.includes(st.symbol) ? 'Saved' : '+ Save'}
-                  </button>
-                  <button 
-                    onClick={() => setActiveChartSymbol(st.tvSymbol)}
-                    className="flex-1 text-[10px] font-bold py-1 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-500/30 rounded cursor-pointer transition-colors"
-                  >
-                    Chart
-                  </button>
+        {sub === "News" && (
+          <section className="ao-card">
+            <h2 className="ao-t">Market News</h2>
+            {newsX.err && !newsX.data && <Empty t="Needs the updated backend (markets_api.py)" />}
+            {!newsX.data && !newsX.err && <Empty t="Loading…" />}
+            {newsX.data && !newsX.data.items.length && <Empty t="No headlines right now" />}
+            {newsX.data && newsX.data.items.map((n, i) => (
+              <div className="ao-news" key={i}>
+                <small>{n.source}{timeAgo(n.time) ? " · " + timeAgo(n.time) : ""}</small>
+                <div style={{ fontWeight: 600, margin: "6px 0" }}>
+                  {n.url ? <a href={n.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{n.title} ↗</a> : n.title}
                 </div>
               </div>
             ))}
+          </section>
+        )}
+
+        <section className="ao-card ao-row">
+          <h2 className="ao-t" style={{ margin: 0 }}>Join our Community</h2>
+          <div className="ao-soc">
+            {[["YT", "#e11d1d"], ["IG", "#c13584"], ["f", "#1877f2"], ["X", "#111"], ["in", "#0a66c2"]].map(([l, c]) => <span key={l} style={{ background: c, border: "1px solid #333" }}>{l}</span>)}
           </div>
         </section>
-
-        {/* SECTION 2 & 3: FII/DII FLOWS + OPTIONS CHAIN SNAPSHOT (2-COLUMN) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-          
-          {/* SECTION 2: FII / DII ACTIVITY */}
-          <div className="lg:col-span-6 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>FII / DII INSTITUTIONAL FLOWS (₹ CR)</span>
-              <span className="text-[10px] font-mono text-slate-500">DAILY CASH</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr className="text-slate-500 text-[10px] border-b border-slate-800/60 uppercase">
-                    <th className="pb-1.5">Date</th>
-                    <th className="pb-1.5">Institution</th>
-                    <th className="pb-1.5 text-right">Buy</th>
-                    <th className="pb-1.5 text-right">Sell</th>
-                    <th className="pb-1.5 text-right">Net</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {fiiDiiData.map((row, idx) => (
-                    <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-1.5 text-slate-400">{row.date}</td>
-                      <td className="py-1.5 font-bold text-white">{row.inst}</td>
-                      <td className="py-1.5 text-right text-slate-300">₹{row.buy}</td>
-                      <td className="py-1.5 text-right text-slate-300">₹{row.sell}</td>
-                      <td className={`py-1.5 text-right font-bold ${row.isNetPos ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {row.net}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* SECTION 3: OPTIONS CHAIN SNAPSHOT */}
-          <div className="lg:col-span-6 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>OPTIONS CHAIN OVERVIEW</span>
-              <span className="text-[10px] font-mono text-slate-500">DERIVATIVES</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr className="text-slate-500 text-[10px] border-b border-slate-800/60 uppercase">
-                    <th className="pb-1.5">Index</th>
-                    <th className="pb-1.5 text-right">PCR</th>
-                    <th className="pb-1.5 text-right">Max Pain</th>
-                    <th className="pb-1.5 text-right">Call OI</th>
-                    <th className="pb-1.5 text-right">Put OI</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {optionsChainSnapshot.map((opt, idx) => (
-                    <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-1.5 font-bold text-blue-400">{opt.index}</td>
-                      <td className="py-1.5 text-right font-bold text-white">{opt.pcr}</td>
-                      <td className="py-1.5 text-right text-slate-300">{opt.maxPain}</td>
-                      <td className="py-1.5 text-right text-red-400">{opt.highestCallOI}</td>
-                      <td className="py-1.5 text-right text-emerald-400">{opt.highestPutOI}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
-
-        {/* SECTION 4, 5, 6: VOLUME BREAKOUTS + 52W HIGH/LOW (3-COLUMN) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-          
-          {/* SECTION 4: TOP VOLUME BREAKOUTS */}
-          <div className="lg:col-span-6 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>VOLUME SURGE &amp; BREAKOUTS</span>
-              <span className="text-[10px] font-mono text-slate-500">UNUSUAL ACTIVITY</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr className="text-slate-500 text-[10px] border-b border-slate-800/60 uppercase">
-                    <th className="pb-1.5">Stock</th>
-                    <th className="pb-1.5">Sector</th>
-                    <th className="pb-1.5 text-right">Volume</th>
-                    <th className="pb-1.5 text-right">Vol Chg</th>
-                    <th className="pb-1.5 text-right">CMP (₹)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {volumeBreakouts.map((vb, i) => (
-                    <tr key={i} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-1.5 font-bold text-white">{vb.stock || vb.symbol}</td>
-                      <td className="py-1.5 text-slate-400 text-[10px]">{vb.sector}</td>
-                      <td className="py-1.5 text-right text-slate-200">{vb.vol}</td>
-                      <td className="py-1.5 text-right font-bold text-emerald-400">{vb.volChg}</td>
-                      <td className="py-1.5 text-right font-bold text-white">₹{vb.price}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* SECTION 5: 52 WEEK HIGH */}
-          <div className="lg:col-span-3 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span className="text-emerald-400">52 WEEK HIGHS</span>
-              <span className="text-[10px] font-mono text-slate-500">RECORD</span>
-            </div>
-
-            <div className="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar pr-1 font-mono text-xs">
-              {weekHighs.map((h, i) => (
-                <div key={i} className="bg-[#0E1320] p-1.5 rounded border border-slate-800/80 flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-white block">{h.symbol}</span>
-                    <span className="text-[10px] text-slate-500">High: ₹{h.high}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-bold text-white block">₹{h.price}</span>
-                    <span className="text-[10px] font-bold text-emerald-400">{h.pct}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SECTION 6: 52 WEEK LOW */}
-          <div className="lg:col-span-3 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span className="text-red-400">52 WEEK LOWS</span>
-              <span className="text-[10px] font-mono text-slate-500">LAGGARDS</span>
-            </div>
-
-            <div className="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar pr-1 font-mono text-xs">
-              {weekLows.map((l, i) => (
-                <div key={i} className="bg-[#0E1320] p-1.5 rounded border border-slate-800/80 flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-white block">{l.symbol}</span>
-                    <span className="text-[10px] text-slate-500">Low: ₹{l.low}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-bold text-white block">₹{l.price}</span>
-                    <span className="text-[10px] font-bold text-red-400">{l.pct}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-        </div>
-
-        {/* SECTION 7, 8, 9: EARNINGS, DIVIDENDS, BONUS/SPLIT (3-COLUMN) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          
-          {/* SECTION 7: UPCOMING EARNINGS */}
-          <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>UPCOMING EARNINGS</span>
-              <span className="text-[10px] font-mono text-slate-500">Q1 RESULTS</span>
-            </div>
-
-            <div className="space-y-1.5 text-xs">
-              {upcomingEarnings.map((earn, i) => (
-                <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded">
-                  <span className="font-bold text-white block truncate">{earn.company}</span>
-                  <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mt-1">
-                    <span>Est EPS: {earn.eps}</span>
-                    <span className="text-blue-400">{earn.date}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SECTION 8: DIVIDEND CALENDAR */}
-          <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>DIVIDEND CALENDAR</span>
-              <span className="text-[10px] font-mono text-slate-500">PAYOUTS</span>
-            </div>
-
-            <div className="space-y-1.5 text-xs">
-              {dividendCalendar.map((div, i) => (
-                <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-white block">{div.company}</span>
-                    <span className="text-[10px] text-emerald-400 font-mono font-bold">{div.div}</span>
-                  </div>
-                  <div className="text-right text-[10px] font-mono text-slate-400">
-                    <span>Ex: {div.exDate}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SECTION 9: BONUS & SPLIT CALENDAR */}
-          <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>BONUS &amp; SPLIT ACTIONS</span>
-              <span className="text-[10px] font-mono text-slate-500">CORPORATE</span>
-            </div>
-
-            <div className="space-y-1.5 text-xs">
-              {bonusSplitCalendar.map((bs, i) => (
-                <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-white block">{bs.company}</span>
-                    <span className="text-[10px] text-blue-400 font-mono font-bold">{bs.type}</span>
-                  </div>
-                  <div className="text-right text-[10px] font-mono text-slate-400">
-                    <span>{bs.exDate}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-        </div>
-
-        {/* SECTION 10 & 11: MUTUAL FUNDS & ETFS (2-COLUMN) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-          
-          {/* SECTION 10: MUTUAL FUND HIGHLIGHTS */}
-          <div className="lg:col-span-6 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>MUTUAL FUND HIGHLIGHTS</span>
-              <span className="text-[10px] font-mono text-slate-500">TOP RETURNERS</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr className="text-slate-500 text-[10px] border-b border-slate-800/60 uppercase">
-                    <th className="pb-1.5">Fund Name</th>
-                    <th className="pb-1.5 text-right">3Y Return</th>
-                    <th className="pb-1.5 text-right">NAV (₹)</th>
-                    <th className="pb-1.5 text-right">Risk</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {mutualFundHighlights.map((mf, i) => (
-                    <tr key={i} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-1.5 font-bold text-slate-200">{mf.name}</td>
-                      <td className="py-1.5 text-right font-bold text-emerald-400">{mf.ret3Y}</td>
-                      <td className="py-1.5 text-right text-slate-300">₹{mf.nav}</td>
-                      <td className="py-1.5 text-right text-[9px]">
-                        <span className="bg-red-950/60 text-red-400 border border-red-800/60 px-1.5 py-0.5 rounded">
-                          {mf.risk}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* SECTION 11: ETF MARKET */}
-          <div className="lg:col-span-6 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>MOST TRADED ETFs</span>
-              <span className="text-[10px] font-mono text-slate-500">EXCHANGE TRADED</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr className="text-slate-500 text-[10px] border-b border-slate-800/60 uppercase">
-                    <th className="pb-1.5">ETF Instrument</th>
-                    <th className="pb-1.5 text-right">Price (₹)</th>
-                    <th className="pb-1.5 text-right">Chg (%)</th>
-                    <th className="pb-1.5 text-right">Volume</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {etfMarket.map((etf, i) => (
-                    <tr key={i} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-1.5 font-bold text-blue-400">{etf.symbol}</td>
-                      <td className="py-1.5 text-right font-bold text-white">₹{etf.price}</td>
-                      <td className={`py-1.5 text-right font-bold ${etf.pct?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {etf.pct}
-                      </td>
-                      <td className="py-1.5 text-right text-slate-400">{etf.vol}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
-
-        {/* SECTION 12, 13, 14: COMMODITIES, CURRENCY, CRYPTO (3-COLUMN) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          
-          {/* SECTION 12: COMMODITY MARKET */}
-          <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>COMMODITIES (MCX)</span>
-              <span className="text-[10px] font-mono text-slate-500">FUTURES</span>
-            </div>
-
-            <div className="space-y-1.5 font-mono text-xs">
-              {commodityMarket.map((c, i) => (
-                <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-white block">{c.symbol}</span>
-                    <span className="text-[10px] text-slate-500">{c.low} - {c.high}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-bold text-white block">₹{c.price}</span>
-                    <span className={`text-[10px] font-bold ${c.pct?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>{c.pct}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SECTION 13: CURRENCY MARKET */}
-          <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>CURRENCY FOREX</span>
-              <span className="text-[10px] font-mono text-slate-500">PAIRS</span>
-            </div>
-
-            <div className="space-y-1.5 font-mono text-xs">
-              {currencyMarket.map((cur, i) => (
-                <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-white block">{cur.pair}</span>
-                    <span className="text-[10px] text-slate-500">{cur.low} - {cur.high}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-bold text-white block">₹{cur.price}</span>
-                    <span className={`text-[10px] font-bold ${cur.pct?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>{cur.pct}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SECTION 14: CRYPTO MARKET */}
-          <div className="bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>CRYPTO ASSETS</span>
-              <span className="text-[10px] font-mono text-slate-500">24H GLOBAL</span>
-            </div>
-
-            <div className="space-y-1.5 font-mono text-xs">
-              {cryptoMarket.map((cr, i) => (
-                <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-white block">{cr.coin}</span>
-                    <span className="text-[10px] text-slate-500">Vol: {cr.vol}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-bold text-white block">{cr.price}</span>
-                    <span className={`text-[10px] font-bold ${cr.pct?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>{cr.pct}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-        </div>
-
-        {/* SECTION 15 & 16: RECENTLY VIEWED + RECOMMENDED (2-COLUMN) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-          
-          {/* SECTION 15: RECENTLY VIEWED STOCKS */}
-          <div className="lg:col-span-5 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span>RECENTLY VIEWED</span>
-              <span className="text-[10px] font-mono text-slate-500">HISTORY</span>
-            </div>
-
-            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-              {recentlyViewed.map((rv, i) => (
-                <div 
-                  key={i} 
-                  onClick={() => setActiveChartSymbol(`NSE:${rv.symbol}`)}
-                  className="bg-[#0E1320] border border-slate-800/80 rounded-lg p-2 shrink-0 w-28 cursor-pointer hover:border-blue-500/40 transition-colors"
-                >
-                  <span className="font-bold text-white text-xs block">{rv.symbol}</span>
-                  <span className="font-mono text-xs block text-slate-300">₹{rv.price}</span>
-                  <span className={`font-mono text-[10px] font-bold ${rv.pct?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {rv.pct}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SECTION 16: RECOMMENDED FOR YOU */}
-          <div className="lg:col-span-7 bg-[#131927] border border-slate-800/80 rounded-xl p-3 shadow-lg space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-              <span className="flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                <span>RECOMMENDED FOR YOU</span>
-              </span>
-              <span className="text-[10px] font-mono text-blue-400">MOMENTUM SCANNER</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {aiRecommendations.map((rec, i) => (
-                <div key={i} className="bg-[#0E1320] border border-slate-800 p-2 rounded space-y-1">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-white text-xs">{rec.symbol}</span>
-                    <span className="text-[9px] font-mono bg-blue-950 text-blue-400 px-1 rounded border border-blue-800">
-                      Target: {rec.target}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-400 leading-tight">{rec.reason}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-        </div>
-
-        {/* SECTION 17: MARKET LEARNING & ARTICLES */}
-        <section className="bg-[#131927] border border-slate-800/80 rounded-xl p-3.5 shadow-lg space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-xs font-bold text-white">
-            <span className="flex items-center gap-1.5">
-              <BookOpen className="w-3.5 h-3.5 text-purple-400" />
-              <span>MARKET KNOWLEDGE &amp; ACADEMY BULLETINS</span>
-            </span>
-            <span className="text-[10px] font-mono text-slate-500">EDUCATIONAL</span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {learningArticles.map((art, i) => (
-              <div key={i} className="bg-[#0E1320] border border-slate-800 p-3 rounded-lg flex flex-col justify-between hover:border-slate-700 transition-colors cursor-pointer">
-                <div>
-                  <div className="flex items-center justify-between text-[9px] font-mono mb-1.5">
-                    <span className="text-purple-400 font-bold bg-purple-950 px-1.5 py-0.2 rounded border border-purple-800">{art.category}</span>
-                    <span className="text-slate-500">{art.time}</span>
-                  </div>
-                  <h4 className="font-semibold text-xs text-slate-200 hover:text-blue-400 transition-colors leading-snug">
-                    {art.title}
-                  </h4>
-                </div>
-                <div className="mt-2 pt-2 border-t border-slate-800/60 text-right">
-                  <span className="text-[10px] font-bold text-blue-400 flex items-center justify-end gap-1">
-                    Read Bulletin <ArrowRight className="w-3 h-3" />
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-      </main>
-
-      {/* ========================================================================= */}
-      {/* SECTION 18: PROFESSIONAL TERMINAL FOOTER */}
-      {/* ========================================================================= */}
-      <footer className="max-w-[1600px] mx-auto px-4 border-t border-slate-800/80 pt-8 mt-12 text-xs text-slate-400 space-y-6">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
-          <div className="space-y-2">
-            <div className="font-black text-white text-sm tracking-tight flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-blue-500" />
-              STOCKFINDER
-            </div>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              Institutional-grade market intelligence, technical charting, and derivative order flow analysis.
-            </p>
-          </div>
-
-          <div>
-            <h5 className="font-bold text-white text-xs uppercase mb-2 font-mono">Markets</h5>
-            <ul className="space-y-1 text-[11px] text-slate-400 font-mono">
-              <li className="hover:text-white cursor-pointer">NSE Equity</li>
-              <li className="hover:text-white cursor-pointer">F&amp;O Options Chain</li>
-              <li className="hover:text-white cursor-pointer">MCX Commodities</li>
-              <li className="hover:text-white cursor-pointer">Global Indices</li>
-            </ul>
-          </div>
-
-          <div>
-            <h5 className="font-bold text-white text-xs uppercase mb-2 font-mono">Tools</h5>
-            <ul className="space-y-1 text-[11px] text-slate-400 font-mono">
-              <li className="hover:text-white cursor-pointer">Stock Screener</li>
-              <li className="hover:text-white cursor-pointer">Trading Terminal</li>
-              <li className="hover:text-white cursor-pointer">SIP Calculator</li>
-              <li className="hover:text-white cursor-pointer">IPO Desk</li>
-            </ul>
-          </div>
-
-          <div>
-            <h5 className="font-bold text-white text-xs uppercase mb-2 font-mono">Resources</h5>
-            <ul className="space-y-1 text-[11px] text-slate-400 font-mono">
-              <li className="hover:text-white cursor-pointer">Documentation</li>
-              <li className="hover:text-white cursor-pointer">API Access</li>
-              <li className="hover:text-white cursor-pointer">Market Bulletins</li>
-              <li className="hover:text-white cursor-pointer">Economic Calendar</li>
-            </ul>
-          </div>
-
-          <div>
-            <h5 className="font-bold text-white text-xs uppercase mb-2 font-mono">Legal</h5>
-            <ul className="space-y-1 text-[11px] text-slate-400 font-mono">
-              <li className="hover:text-white cursor-pointer">Terms of Service</li>
-              <li className="hover:text-white cursor-pointer">Privacy Policy</li>
-              <li className="hover:text-white cursor-pointer">SEBI Disclosure</li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="border-t border-slate-800/80 pt-4 flex flex-col md:flex-row items-center justify-between text-[10px] text-slate-500 gap-2">
-          <p>© 2026 StockFinder Terminal. All rights reserved.</p>
-          <p className="max-w-xl text-center md:text-right">
-            Disclaimer: Market data displayed is for informational purposes only. Past performance is not indicative of future returns.
-          </p>
-        </div>
-      </footer>
-
+        <div style={{ textAlign: "center", fontSize: 11, color: "#5d616d" }}>Prices are delayed and for learning and analysis only. Not investment advice.</div>
+      </div>
     </div>
   );
 }
+
+const CORP = {
+  Split: [["INTERARCH BLDNG SOLTN LTD", "10:2", "2026-11-30"], ["BN AGROCHEM LTD.", "10:1", "2026-11-16"]],
+  "Board Meeting": [["TATA STEEL LTD", "Q2 results", "2026-11-18"], ["WIPRO LTD", "Interim dividend", "2026-11-20"]],
+  Bonus: [["SAMPLE INDUSTRIES LTD", "1:1", "2026-11-25"]],
+  Dividend: [["INFOSYS LTD", "₹20 / share", "2026-11-22"], ["TCS LTD", "₹10 / share", "2026-11-28"]],
+  Rights: [["SAMPLE FINANCE LTD", "1:4", "2026-12-02"]],
+};
+const NEWS = [
+  { src: "Market Desk", t: "Board approves H1 FY27 results; no deviation in IPO proceeds use", sym: "SAMPLE", ago: "2 mins ago" },
+  { src: "Market Desk", t: "Results quick look: revenue up year-on-year, margins stable", sym: "SAMPLE", ago: "5 mins ago" },
+  { src: "Market Desk", t: "Board recommends appointment of auditors for FY 2026-27", sym: "SAMPLE", ago: "9 mins ago" },
+];

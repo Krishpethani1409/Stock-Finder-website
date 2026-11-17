@@ -12,6 +12,9 @@ import Mutualfund        from "./Pages/Mutualfund.jsx";
 import IpoPage           from "./Pages/IpoPage.jsx";
 import TickerTape        from "./components/TickerTape.jsx";
 import PortfolioPage     from "./Pages/Portfolio.jsx";
+import AdminDemat from "./Pages/AdminDemat.jsx";
+// import MarketsAngelOne from "./Pages/MarketsAngelOne.jsx";
+
 
 
 export default function App() {
@@ -19,6 +22,7 @@ export default function App() {
     <Routes>
       <Route path="/"                 element={<Homepage />}       />
       <Route path="/stock/:symbol"    element={<StockDetail />}    />
+      <Route path="/admin-demat" element={<AdminDemat />} />
       <Route path="/screener"         element={<ScreenerSearch />} />
       <Route path="/screener/:symbol" element={<ScreenerResult />} />
       <Route path="/markets"          element={<MarketsPage />}    />
@@ -29,6 +33,7 @@ export default function App() {
       <Route path="/tools"            element={<ToolsPage />}      />
       <Route path="/IpoPage"          element={<IpoPage />}        />
       <Route path="/TickerTape"       element={<TickerTape />}        />
+      {/* <Route path="/markets2" element={<MarketsAngelOne />} /> */}
       <Route path="/Portfolio" element={<PortfolioPage />} />
     </Routes>
   );
