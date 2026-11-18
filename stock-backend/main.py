@@ -17,13 +17,19 @@ app = FastAPI(
 # NOTE: allow_credentials=True + allow_origins=["*"] is actually rejected by
 # browsers. Since this API doesn't use cookies/auth, keep credentials False.
 # In production, replace "*" with your real frontend URL(s).
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+import os
+origins = [o.strip() for o in os.environ.get(
+    "ALLOWED_ORIGINS", "http://localhost:5173").split(",")]
+app.add_middleware(CORSMiddleware, allow_origins=origins,
+                   allow_methods=["*"], allow_headers=["*"])
+from demat_api import router as demat_router
+app.include_router(demat_router)
+
+from auth_api import router as auth_router
+app.include_router(auth_router)
+
+from markets_api import router as markets_router
+app.include_router(markets_router)
 
 from screener_api import router as screener_router
 app.include_router(screener_router)
