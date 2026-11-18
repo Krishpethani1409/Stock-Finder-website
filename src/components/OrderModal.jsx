@@ -4,7 +4,7 @@ import { placeOrder, loadPortfolio, marginFor, chargesFor, marketStatus } from "
 
 /* Order window (broker style). Opens when you click B or S.
    Orders go to the same trading engine as the Portfolio page. */
-const API = "http://localhost:8000";
+const API = (import.meta.env.VITE_API_URL || "http://localhost:8000");
 const inr = (n) => "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const css = `

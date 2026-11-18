@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar.jsx";
 
-const API = "http://localhost:8000";
+const API = (import.meta.env.VITE_API_URL || "http://localhost:8000");
 const C = {
   bg: "#0b1220", card: "#111c31", card2: "#16233d", border: "#22304d",
   text: "#e8eefc", dim: "#8fa3c7", mute: "#5d7096", blue: "#3b82f6", green: "#22c55e", red: "#ef4444",

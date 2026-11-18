@@ -13,7 +13,7 @@ import {
   resetPortfolio, chargesFor, marginFor, marketStatus, todayKey, LEVERAGE,
 } from "../store/portfolioStore.js";
 
-const API = "http://localhost:8000";
+const API = (import.meta.env.VITE_API_URL || "http://localhost:8000");
 const PRICE_CACHE = "sf_live_prices";
 const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif";
 

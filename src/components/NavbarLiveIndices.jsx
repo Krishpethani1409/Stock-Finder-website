@@ -6,7 +6,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API = "http://localhost:8000";
+const API = (import.meta.env.VITE_API_URL || "http://localhost:8000");
 const GREEN = "#00b386", RED = "#e5314a";
 
 function useIndices() {

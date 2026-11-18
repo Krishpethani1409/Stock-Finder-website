@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-export const API = "http://localhost:8000";
+export const API = (import.meta.env.VITE_API_URL || "http://localhost:8000");
 
 export const SECTOR = {
   RELIANCE: "Energy", ONGC: "Energy", COALINDIA: "Energy", POWERGRID: "Power", NTPC: "Power", RPOWER: "Power",

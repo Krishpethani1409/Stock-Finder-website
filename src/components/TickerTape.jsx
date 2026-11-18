@@ -10,7 +10,7 @@ const C = {
    GET /indices → NIFTY, SENSEX, BANKNIFTY
    GET /stocks  → all 29 stocks
    Refreshes every 30s. Keeps the last prices if the API is offline. */
-const API = "http://localhost:8000";
+const API = (import.meta.env.VITE_API_URL || "http://localhost:8000");
 const CACHE = "sf_ticker_cache";
 
 function useLiveStocks() {

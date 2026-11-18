@@ -2,7 +2,7 @@ import { useLocation } from 'react-router-dom';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Navbar from '../components/Navbar.jsx';
 import { buyStock, sellStock } from '../store/portfolioStore.js';
-import Tickertape from '../components/Tickertape.jsx';
+import Tickertape from '../components/TickerTape.jsx';
 import TradingViewWidget from '../components/TradingViewWidget.jsx';
 import {
   Search, X, Plus, Star, TrendingUp, TrendingDown, Zap,
@@ -105,8 +105,8 @@ const idxActive = idxChart && idxChart.forSymbol === selectedSymbol;
        try {
          const all = [...new Set(Object.values(watchlists).flat().concat(selectedSymbol))];
          const [a, b] = await Promise.allSettled([
-           fetch('http://localhost:8000/stocks').then((r) => r.json()),
-           fetch('http://localhost:8000/quotes?symbols=' + all.join(',')).then((r) => r.json()),
+           fetch((import.meta.env.VITE_API_URL || "http://localhost:8000") + '/stocks').then((r) => r.json()),
+           fetch((import.meta.env.VITE_API_URL || "http://localhost:8000") + '/quotes?symbols=' + all.join(',')).then((r) => r.json()),
          ]);
          const map = {};
          if (b.status === 'fulfilled') {
@@ -515,7 +515,7 @@ function OverviewPanel({ symbol, data }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`http://localhost:8000/stock/${symbol}`)
+    fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/stock/${symbol}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (!cancelled) setDetails(d); })
       .catch(() => {});

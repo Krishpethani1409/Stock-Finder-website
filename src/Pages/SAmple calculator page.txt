@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
-import Tickertape from '../components/Tickertape.jsx';
+import Tickertape from '../components/TickerTape.jsx';
 import Logo from '../components/Logo.jsx';
 import { 
   Calculator, ChevronRight, RefreshCw, TrendingUp, PieChart, 

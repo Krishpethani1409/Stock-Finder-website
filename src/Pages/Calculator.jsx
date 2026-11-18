@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import Navbar from '../components/Navbar.jsx';
-import Tickertape from '../components/Tickertape.jsx';
+import Tickertape from '../components/TickerTape.jsx';
 import {
   Calculator as CalcIcon, TrendingUp, Repeat, Percent,
   IndianRupee, Info, PieChart as PieIcon, Sparkles

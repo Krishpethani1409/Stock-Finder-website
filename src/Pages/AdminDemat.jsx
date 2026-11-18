@@ -3,7 +3,7 @@ import Navbar from "../components/Navbar.jsx";
 
 /* Admin page: see everyone who applied for a demat account.  URL: /admin-demat
    You must type your secret key (the DEMAT_ADMIN_KEY you set before starting the backend). */
-const API = "http://localhost:8000";
+const API = (import.meta.env.VITE_API_URL || "http://localhost:8000");
 const KEY = "sf_admin_key";
 
 export default function AdminDemat() {

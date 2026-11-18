@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
-import Tickertape from '../components/Tickertape.jsx';
+import Tickertape from '../components/TickerTape.jsx';
 import Logo from '../components/Logo.jsx';
 import { 
   Search, BarChart2, PieChart, 
@@ -32,9 +32,9 @@ export default function Homepage() {
     const fetchBackendData = async () => {
       try {
         const [resStocks, resMovers, resIpo] = await Promise.all([
-          fetch('http://localhost:8000/stocks'),
-          fetch('http://localhost:8000/gainers'),
-          fetch('http://localhost:8000/ipo/open')
+          fetch((import.meta.env.VITE_API_URL || "http://localhost:8000") + '/stocks'),
+          fetch((import.meta.env.VITE_API_URL || "http://localhost:8000") + '/gainers'),
+          fetch((import.meta.env.VITE_API_URL || "http://localhost:8000") + '/ipo/open')
         ]);
 
         if (resStocks.ok) {
