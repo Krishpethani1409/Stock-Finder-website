@@ -1,0 +1,91 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  overflow-y: scroll; /* always reserve scrollbar space */
+  scrollbar-gutter: stable;
+}
+
+body {
+  margin: 0;
+}
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100vh;
+  background-color: #0B1220;
+}
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+input::placeholder {
+  color: #475569;
+}
+
+a {
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0B1220;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1E293B;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* ---- Ticker tape scroll animation ----
+   What is this? Moves the ticker strip continuously left
+   How to use it? Applied automatically via style={tickerTrack}
+   Why we need it? Creates the "live exchange feed" signature look
+*/
+
+@keyframes scrollTicker {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+nav,
+nav * {
+  font-family: 'Inter', system-ui, sans-serif !important;
+}
+
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}

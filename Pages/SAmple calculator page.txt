@@ -1,0 +1,683 @@
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import Navbar from '../components/Navbar.jsx';
+import Tickertape from '../components/Tickertape.jsx';
+import Logo from '../components/Logo.jsx';
+import { 
+  Calculator, ChevronRight, RefreshCw, TrendingUp, PieChart, 
+  HelpCircle, ArrowRight, CheckCircle2, ChevronDown, Award, 
+  BookOpen, Lightbulb, ShieldCheck, DollarSign, Percent, BarChart2,
+  Home, GraduationCap, Clock, AlertCircle, RotateCcw, SlidersHorizontal
+} from 'lucide-react';
+
+/* ═════════════════════════════════════════════════════════════════
+   STOCKFINDER DESIGN TOKENS
+═════════════════════════════════════════════════════════════════ */
+const C = {
+  bg: "#0B0F19",
+  surface: "#131927",
+  card: "#0E1320",
+  border: "#1E293B",
+  borderHover: "#2563EB",
+  green: "#00B386",
+  red: "#EF4444",
+  blue: "#2563EB",
+  blueHover: "#1D4ED8",
+  textPri: "#F8FAFC",
+  textSec: "#94A3B8",
+  yellow: "#F59E0B",
+  purple: "#7C3AED"
+};
+
+export default function CalculatorPage() {
+  const navigate = useNavigate();
+
+  // ── INPUT STATES ──
+  const [monthlyInvestment, setMonthlyInvestment] = useState(5000);
+  const [durationYears, setDurationYears] = useState(5);
+  const [expectedRate, setExpectedRate] = useState(12);
+  const [frequency, setFrequency] = useState('MONTHLY'); // 'MONTHLY' | 'QUARTERLY' | 'YEARLY'
+
+  // Accordion State for FAQs
+  const [openFaq, setOpenFaq] = useState(null);
+
+  // Reset Handler
+  const handleReset = () => {
+    setMonthlyInvestment(5000);
+    setDurationYears(5);
+    setExpectedRate(12);
+    setFrequency('MONTHLY');
+  };
+
+  // ── DYNAMIC SIP MATHEMATICAL ENGINE ──
+  const sipResult = useMemo(() => {
+    const P = Math.max(100, Number(monthlyInvestment) || 0);
+    const r = Math.max(1, Math.min(30, Number(expectedRate) || 12));
+    const t = Math.max(1, Math.min(30, Number(durationYears) || 5));
+
+    // Frequency multiplier adjustments
+    let nPeriods = t * 12;
+    let ratePerPeriod = r / 12 / 100;
+
+    if (frequency === 'QUARTERLY') {
+      nPeriods = t * 4;
+      ratePerPeriod = r / 4 / 100;
+    } else if (frequency === 'YEARLY') {
+      nPeriods = t;
+      ratePerPeriod = r / 100;
+    }
+
+    const totalInvested = P * nPeriods;
+    // Formula: FV = P * [((1 + i)^n - 1) / i] * (1 + i)
+    const futureValue = P * ((Math.pow(1 + ratePerPeriod, nPeriods) - 1) / ratePerPeriod) * (1 + ratePerPeriod);
+    const estimatedReturns = Math.max(0, futureValue - totalInvested);
+
+    // Amortization Schedule (Year-by-Year Table)
+    const schedule = [];
+    for (let year = 1; year <= t; year++) {
+      const periodsSoFar = frequency === 'QUARTERLY' ? year * 4 : frequency === 'YEARLY' ? year : year * 12;
+      const yrInvested = P * periodsSoFar;
+      const yrFV = P * ((Math.pow(1 + ratePerPeriod, periodsSoFar) - 1) / ratePerPeriod) * (1 + ratePerPeriod);
+      const yrReturns = yrFV - yrInvested;
+
+      schedule.push({
+        year,
+        invested: Math.round(yrInvested),
+        returns: Math.round(yrReturns),
+        total: Math.round(yrFV)
+      });
+    }
+
+    return {
+      invested: Math.round(totalInvested),
+      returns: Math.round(estimatedReturns),
+      total: Math.round(futureValue),
+      schedule
+    };
+  }, [monthlyInvestment, durationYears, expectedRate, frequency]);
+
+  // Donut Chart SVG Calculation
+  const donutData = useMemo(() => {
+    const total = sipResult.total || 1;
+    const investedPct = Math.min(100, Math.max(0, (sipResult.invested / total) * 100));
+    const returnsPct = 100 - investedPct;
+    
+    // Donut Stroke Circumference (r=40, C = 2 * PI * 40 = ~251.32)
+    const C_LEN = 251.32;
+    const investedDash = (investedPct / 100) * C_LEN;
+    const returnsDash = C_LEN - investedDash;
+
+    return {
+      investedPct: investedPct.toFixed(1),
+      returnsPct: returnsPct.toFixed(1),
+      investedDash,
+      returnsDash,
+      offset: -investedDash
+    };
+  }, [sipResult]);
+
+  // Scenario Comparison Data (3 Cases)
+  const scenarios = useMemo(() => {
+    const r = expectedRate / 12 / 100;
+    const n = durationYears * 12;
+
+    const calcVal = (p) => {
+      const inv = p * n;
+      const fv = p * ((Math.pow(1 + r, n) - 1) / r) * (1 + r);
+      return { inv: Math.round(inv), fv: Math.round(fv) };
+    };
+
+    return [
+      { monthly: 5000, ...calcVal(5000) },
+      { monthly: 10000, ...calcVal(10000) },
+      { monthly: 20000, ...calcVal(20000) },
+    ];
+  }, [durationYears, expectedRate]);
+
+  // Indian Rupee Currency Formatter
+  const formatINR = (val) => {
+    return `₹${Number(val).toLocaleString('en-IN')}`;
+  };
+
+  const relatedCalculators = [
+    { title: "Lumpsum Calculator", desc: "Estimate compound returns on one-time wealth investments.", icon: PieChart },
+    { title: "SWP Calculator", desc: "Plan monthly systematic withdrawals from your mutual fund pool.", icon: RefreshCw },
+    { title: "Step-Up SIP", desc: "Calculate returns when you increase SIP contribution annually.", icon: TrendingUp },
+    { title: "CAGR Calculator", desc: "Compute Compound Annual Growth Rate for stock investments.", icon: Percent },
+    { title: "Mutual Fund Returns", desc: "XIRR and CAGR return calculator for equity mutual funds.", icon: DollarSign },
+    { title: "Retirement Planner", desc: "Determine exact corpus required post-retirement.", icon: ShieldCheck },
+  ];
+
+  const categories = [
+    { title: "Investment", count: "8 Tools" },
+    { title: "Trading & F&O", count: "8 Tools" },
+    { title: "Mutual Funds", count: "6 Tools" },
+    { title: "Retirement", count: "4 Tools" },
+    { title: "Loans & EMI", count: "5 Tools" },
+    { title: "Taxation", count: "4 Tools" },
+    { title: "Goal Planning", count: "5 Tools" },
+  ];
+
+  const faqs = [
+    { q: "What is a Systematic Investment Plan (SIP)?", a: "A Systematic Investment Plan (SIP) is an investment vehicle offered by mutual funds where investors can allocate a fixed sum of money periodically (monthly, quarterly, or annually) into a chosen scheme, benefitting from rupee-cost averaging and long-term compounding." },
+    { q: "How are SIP returns calculated in this tool?", a: "SIP returns are computed using the future value formula for annuity due: FV = P × [((1 + i)^n - 1) / i] × (1 + i), where 'P' is the periodic investment, 'i' is the period interest rate, and 'n' is the total number of investment periods." },
+    { q: "Can I increase my SIP amount in the future?", a: "Yes! You can use a Step-Up SIP (or Top-Up SIP), which allows you to increase your periodic investment amount automatically by a fixed percentage or amount every year as your income grows." },
+    { q: "What happens to my SIP if the market drops?", a: "Market drops work to your advantage in an active SIP. When prices fall, your fixed monthly investment buys more mutual fund units (Rupee-Cost Averaging). When markets recover, these extra units accelerate portfolio gains." },
+    { q: "What is the difference between SIP and Lumpsum?", a: "In a SIP, you invest small amounts periodically over time. In a Lumpsum investment, you invest a large sum of capital all at once. SIPs reduce market timing risks, while Lumpsum is ideal when you have sudden windfall liquidity." },
+    { q: "Are SIP returns guaranteed?", a: "No. Mutual fund investments are subject to market risks. Equity SIPs fluctuate based on underlying stock prices, but historically, broad Indian indices like NIFTY 50 have generated 12% to 14% CAGR over 10+ year horizons." },
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#0B0F19] text-slate-100 font-sans pb-24 selection:bg-blue-600 selection:text-white">
+      
+      {/* 1. NAVBAR & TICKERTAPE */}
+      <Navbar />
+      <Tickertape />
+
+      {/* 2. BREADCRUMB & PAGE HEADER */}
+      <section className="pt-6 pb-6 px-4 max-w-7xl mx-auto border-b border-slate-800/80">
+        <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-400 mb-3">
+          <span className="hover:text-blue-400 cursor-pointer" onClick={() => navigate('/')}>Home</span>
+          <ChevronRight className="w-3 h-3 text-slate-600" />
+          <span className="hover:text-blue-400 cursor-pointer" onClick={() => navigate('/calculator')}>Calculators</span>
+          <ChevronRight className="w-3 h-3 text-slate-600" />
+          <span className="text-white font-bold">SIP Calculator</span>
+        </div>
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight flex items-center gap-2">
+              <Calculator className="w-6 h-6 text-blue-500" />
+              <span>SIP Calculator</span>
+            </h1>
+            <p className="text-xs md:text-sm text-slate-400 mt-1">
+              Calculate expected systematic returns, total wealth accumulated, and annual capital gains projections.
+            </p>
+          </div>
+
+          <button 
+            onClick={() => navigate('/mutualfund')}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-lg shadow-blue-600/20 flex items-center gap-1.5 w-max"
+          >
+            <span>Explore Matching Mutual Funds</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </section>
+
+      {/* 3. MAIN CALCULATOR WORKSPACE CONTAINER (DESKTOP: 2-COLUMN) */}
+      <main className="max-w-7xl mx-auto px-4 pt-8 space-y-12">
+
+        {/* WORKSPACE CARD */}
+        <section className="bg-[#131927] border border-slate-800/90 rounded-2xl p-6 md:p-8 shadow-2xl">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            
+            {/* LEFT COLUMN: CALCULATOR INPUTS (45% WEIGHT) */}
+            <div className="lg:col-span-5 space-y-6 pr-0 lg:pr-6 border-b lg:border-b-0 lg:border-r border-slate-800/80 pb-8 lg:pb-0">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#0E1320] border border-slate-800 flex items-center justify-center text-blue-400">
+                    <SlidersHorizontal className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-extrabold text-white">Investment Inputs</h2>
+                    <span className="text-[10px] text-slate-400 block">Adjust parameters to calculate returns</span>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={handleReset}
+                  className="text-[11px] font-bold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors bg-[#0E1320] border border-slate-800 px-2.5 py-1 rounded-lg"
+                >
+                  <RotateCcw className="w-3 h-3 text-slate-400" />
+                  <span>Reset</span>
+                </button>
+              </div>
+
+              {/* INPUT 1: MONTHLY INVESTMENT */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <label className="font-bold text-slate-300">Monthly Investment Amount</label>
+                  <div className="flex items-center bg-[#0E1320] border border-slate-800 rounded-xl px-2.5 py-1 focus-within:border-blue-500">
+                    <span className="text-slate-500 font-mono font-bold mr-1">₹</span>
+                    <input 
+                      type="number"
+                      value={monthlyInvestment}
+                      onChange={(e) => setMonthlyInvestment(Number(e.target.value))}
+                      className="w-24 bg-transparent text-white font-mono font-extrabold text-xs text-right focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <input 
+                  type="range" min="500" max="100000" step="500" 
+                  value={monthlyInvestment}
+                  onChange={(e) => setMonthlyInvestment(Number(e.target.value))}
+                  className="w-full accent-blue-600 bg-slate-800 h-2 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                  <span>₹500</span>
+                  <span>₹1,00,000</span>
+                </div>
+              </div>
+
+              {/* INPUT 2: INVESTMENT DURATION */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <label className="font-bold text-slate-300">Investment Duration (Years)</label>
+                  <div className="flex items-center bg-[#0E1320] border border-slate-800 rounded-xl px-2.5 py-1">
+                    <input 
+                      type="number"
+                      value={durationYears}
+                      onChange={(e) => setDurationYears(Number(e.target.value))}
+                      className="w-12 bg-transparent text-white font-mono font-extrabold text-xs text-right focus:outline-none"
+                    />
+                    <span className="text-slate-500 font-bold ml-1">Yr</span>
+                  </div>
+                </div>
+                <input 
+                  type="range" min="1" max="30" step="1" 
+                  value={durationYears}
+                  onChange={(e) => setDurationYears(Number(e.target.value))}
+                  className="w-full accent-blue-600 bg-slate-800 h-2 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                  <span>1 Year</span>
+                  <span>30 Years</span>
+                </div>
+              </div>
+
+              {/* INPUT 3: EXPECTED RATE OF RETURN */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <label className="font-bold text-slate-300">Expected Rate of Return (p.a.)</label>
+                  <div className="flex items-center bg-[#0E1320] border border-slate-800 rounded-xl px-2.5 py-1">
+                    <input 
+                      type="number"
+                      value={expectedRate}
+                      onChange={(e) => setExpectedRate(Number(e.target.value))}
+                      className="w-12 bg-transparent text-emerald-400 font-mono font-extrabold text-xs text-right focus:outline-none"
+                    />
+                    <span className="text-emerald-400 font-bold ml-0.5">%</span>
+                  </div>
+                </div>
+                <input 
+                  type="range" min="1" max="30" step="0.5" 
+                  value={expectedRate}
+                  onChange={(e) => setExpectedRate(Number(e.target.value))}
+                  className="w-full accent-emerald-500 bg-slate-800 h-2 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                  <span>1%</span>
+                  <span>30%</span>
+                </div>
+              </div>
+
+              {/* INPUT 4: INVESTMENT FREQUENCY SEGMENTED SWITCH */}
+              <div className="space-y-2">
+                <label className="font-bold text-slate-300 text-xs block">Investment Frequency</label>
+                <div className="grid grid-cols-3 gap-1 bg-[#0E1320] p-1 rounded-xl border border-slate-800 text-xs">
+                  {['MONTHLY', 'QUARTERLY', 'YEARLY'].map((freq) => (
+                    <button
+                      key={freq}
+                      onClick={() => setFrequency(freq)}
+                      className={`py-1.5 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                        frequency === freq
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {freq}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* CALL TO ACTION BUTTON */}
+              <button 
+                onClick={() => document.getElementById('insights-breakdown')?.scrollIntoView({ behavior: 'smooth' })}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-blue-600/20 transition-all cursor-pointer text-center block"
+              >
+                Calculate &amp; View Schedule
+              </button>
+            </div>
+
+            {/* RIGHT COLUMN: CALCULATION RESULTS & CHARTS (55% WEIGHT) */}
+            <div className="lg:col-span-7 space-y-6">
+              
+              {/* TOP HIGHLIGHT: ESTIMATED TOTAL WEALTH */}
+              <div className="bg-[#0E1320] border border-slate-800 p-6 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    PROJECTED TOTAL VALUE (AFTER {durationYears} YEARS)
+                  </span>
+                  <div className="text-3xl md:text-4xl font-black text-white font-mono tracking-tight">
+                    {formatINR(sipResult.total)}
+                  </div>
+                </div>
+
+                <div className="text-left sm:text-right border-t sm:border-t-0 border-slate-800 pt-3 sm:pt-0">
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 rounded block w-max sm:ml-auto mb-1">
+                    +{(sipResult.returns / (sipResult.invested || 1) * 100).toFixed(1)}% OVERALL GAIN
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    CAGR: <strong className="text-white">{expectedRate}%</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* SUMMARY STATS GRID */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-[#0E1320] border border-slate-800 p-4 rounded-xl">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Total Capital Invested</span>
+                  <span className="text-lg font-bold text-white font-mono">{formatINR(sipResult.invested)}</span>
+                </div>
+
+                <div className="bg-[#0E1320] border border-slate-800 p-4 rounded-xl">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Estimated Capital Returns</span>
+                  <span className="text-lg font-bold text-emerald-400 font-mono">+{formatINR(sipResult.returns)}</span>
+                </div>
+              </div>
+
+              {/* DONUT CHART BREAKDOWN */}
+              <div className="bg-[#0E1320] border border-slate-800 p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-6">
+                <div className="space-y-3 w-full sm:w-auto">
+                  <span className="text-xs font-bold text-white block">Portfolio Allocation Ratio</span>
+                  
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded bg-blue-600 shrink-0" />
+                      <span className="text-slate-400">Invested Capital:</span>
+                      <span className="font-bold text-white font-mono">{donutData.investedPct}%</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded bg-emerald-400 shrink-0" />
+                      <span className="text-slate-400">Estimated Returns:</span>
+                      <span className="font-bold text-emerald-400 font-mono">{donutData.returnsPct}%</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SVG DONUT CHART */}
+                <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" stroke="#1E293B" strokeWidth="12" fill="transparent" />
+                    {/* Invested Segment */}
+                    <circle 
+                      cx="50" cy="50" r="40" 
+                      stroke="#2563EB" 
+                      strokeWidth="12" 
+                      fill="transparent" 
+                      strokeDasharray={`${donutData.investedDash} 251.32`} 
+                    />
+                    {/* Returns Segment */}
+                    <circle 
+                      cx="50" cy="50" r="40" 
+                      stroke="#00B386" 
+                      strokeWidth="12" 
+                      fill="transparent" 
+                      strokeDasharray={`${251.32 - donutData.investedDash} 251.32`}
+                      strokeDashoffset={donutData.offset}
+                    />
+                  </svg>
+                  <div className="absolute text-center">
+                    <span className="text-[10px] text-slate-400 font-bold block">CAGR</span>
+                    <span className="text-xs font-black text-white">{expectedRate}%</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </section>
+
+        {/* 4. DETAILED YEAR-BY-YEAR AMORTIZATION BREAKDOWN TABLE */}
+        <section id="insights-breakdown" className="bg-[#131927] border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div>
+              <h2 className="text-base font-bold text-white">Year-by-Year Growth Amortization</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Track annual compounding progression over your {durationYears}-year timeline.</p>
+            </div>
+            <span className="text-xs font-mono text-slate-500">{sipResult.schedule.length} Periods</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left font-mono text-xs border-collapse">
+              <thead>
+                <tr className="bg-[#0E1320] border-b border-slate-800 text-slate-400 text-[10px] uppercase">
+                  <th className="p-3">Year</th>
+                  <th className="p-3 text-right">Invested Amount (₹)</th>
+                  <th className="p-3 text-right">Estimated Returns (₹)</th>
+                  <th className="p-3 text-right">Total Future Value (₹)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {sipResult.schedule.map((row) => (
+                  <tr key={row.year} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="p-3 font-bold text-blue-400">Year {row.year}</td>
+                    <td className="p-3 text-right text-slate-200">{formatINR(row.invested)}</td>
+                    <td className="p-3 text-right font-bold text-emerald-400">+{formatINR(row.returns)}</td>
+                    <td className="p-3 text-right font-black text-white">{formatINR(row.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* 5. SCENARIO COMPARISON: WHAT IF YOU INVEST MORE? */}
+        <section className="bg-[#131927] border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+          <div className="border-b border-slate-800 pb-3">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-blue-400" />
+              <span>What If You Invest More? (Scenario Analysis)</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">See how increasing your monthly commitment changes your final wealth over {durationYears} years.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {scenarios.map((sc, i) => (
+              <div key={i} className="bg-[#0E1320] border border-slate-800 p-5 rounded-2xl space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-white">{formatINR(sc.monthly)} / month</span>
+                  <span className="text-[10px] font-bold text-blue-400 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded">
+                    SCENARIO {i + 1}
+                  </span>
+                </div>
+
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Invested:</span>
+                    <span className="font-mono text-white">{formatINR(sc.inv)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Est. Total Value:</span>
+                    <span className="font-mono font-black text-emerald-400">{formatINR(sc.fv)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 6. RELATED CALCULATORS */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h2 className="text-base font-bold text-white">Related Calculators</h2>
+            <button onClick={() => navigate('/calculator')} className="text-xs font-bold text-blue-400 hover:text-blue-300">
+              View All Tools →
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {relatedCalculators.map((calc, idx) => {
+              const IconComp = calc.icon;
+              return (
+                <div 
+                  key={idx}
+                  onClick={() => navigate('/calculator')}
+                  className="bg-[#131927] border border-slate-800 hover:border-blue-500/50 p-4 rounded-2xl cursor-pointer group transition-all duration-200 shadow-md hover:-translate-y-1 flex items-start gap-3"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-[#0E1320] border border-slate-800 flex items-center justify-center text-blue-400 shrink-0">
+                    <IconComp className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-xs text-white group-hover:text-blue-400 transition-colors mb-1">{calc.title}</h3>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">{calc.desc}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 7. MORE FINANCIAL CALCULATORS (CATEGORIES) */}
+        <section className="bg-[#131927] border border-slate-800 rounded-2xl p-5 shadow-xl">
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">More Financial Categories</h2>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {categories.map((cat, i) => (
+              <button
+                key={i}
+                onClick={() => navigate('/calculator')}
+                className="px-3 py-1.5 bg-[#0E1320] border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-xl font-semibold transition-colors cursor-pointer"
+              >
+                {cat.title} ({cat.count})
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* 8. EDUCATIONAL INFORMATION SECTION */}
+        <section className="bg-[#131927] border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl space-y-6">
+          <div className="border-b border-slate-800 pb-4">
+            <h2 className="text-lg font-black text-white flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-blue-400" />
+              <span>Understanding Systematic Investment Plans</span>
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-slate-300 leading-relaxed">
+            <div className="space-y-2">
+              <h3 className="font-bold text-white text-sm">What is a SIP?</h3>
+              <p className="text-slate-400">
+                A Systematic Investment Plan (SIP) allows investors to allocate a fixed sum into mutual fund schemes periodically. It instills financial discipline without requiring market timing skills.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="font-bold text-white text-sm">How SIP Returns Compound</h3>
+              <p className="text-slate-400">
+                SIPs leverage Rupee-Cost Averaging — buying more units when prices fall and fewer when prices rise. Compound interest accelerates total portfolio returns significantly over 5+ year horizons.
+              </p>
+            </div>
+          </div>
+
+          {/* SIP VS LUMPSUM TABLE */}
+          <div className="pt-4 border-t border-slate-800 space-y-3">
+            <h3 className="font-bold text-white text-xs uppercase tracking-wider">SIP vs Lumpsum Comparison</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left font-sans text-xs border-collapse">
+                <thead>
+                  <tr className="bg-[#0E1320] border-b border-slate-800 text-slate-400 text-[10px] uppercase">
+                    <th className="p-3">Feature</th>
+                    <th className="p-3">Systematic Investment Plan (SIP)</th>
+                    <th className="p-3">Lumpsum Investment</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  <tr>
+                    <td className="p-3 font-bold text-white">Investment Frequency</td>
+                    <td className="p-3 text-slate-300">Periodic (Monthly / Quarterly)</td>
+                    <td className="p-3 text-slate-300">One-Time Allocation</td>
+                  </tr>
+                  <tr>
+                    <td className="p-3 font-bold text-white">Market Timing Risk</td>
+                    <td className="p-3 text-emerald-400 font-bold">Low (Rupee Cost Averaged)</td>
+                    <td className="p-3 text-red-400 font-bold">High (Requires Timing Entry)</td>
+                  </tr>
+                  <tr>
+                    <td className="p-3 font-bold text-white">Minimum Capital</td>
+                    <td className="p-3 text-slate-300">Starts as low as ₹500/mo</td>
+                    <td className="p-3 text-slate-300">Typically ₹5,000+ per allocation</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* 9. FAQ ACCORDION SECTION */}
+        <section className="bg-[#131927] border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl space-y-4">
+          <div className="border-b border-slate-800 pb-4">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <HelpCircle className="w-5 h-5 text-blue-400" />
+              <span>Frequently Asked Questions</span>
+            </h2>
+          </div>
+
+          <div className="space-y-3">
+            {faqs.map((faq, idx) => {
+              const isOpen = openFaq === idx;
+              return (
+                <div 
+                  key={idx} 
+                  className="bg-[#0E1320] border border-slate-800 rounded-2xl overflow-hidden transition-all duration-200"
+                >
+                  <button
+                    onClick={() => setOpenFaq(isOpen ? null : idx)}
+                    className="w-full p-4 text-left font-bold text-xs text-white flex items-center justify-between cursor-pointer hover:text-blue-400 transition-colors"
+                  >
+                    <span>{faq.q}</span>
+                    <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isOpen && (
+                    <div className="px-4 pb-4 text-xs text-slate-400 border-t border-slate-800/60 pt-3 leading-relaxed">
+                      {faq.a}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 10. BOTTOM CTA BANNER */}
+        <section className="bg-gradient-to-r from-blue-950/60 to-[#131927] border border-blue-500/30 rounded-2xl p-8 text-center space-y-4 shadow-2xl">
+          <h2 className="text-xl md:text-2xl font-black text-white">Ready to explore your investment roadmap?</h2>
+          <p className="text-xs text-slate-400 max-w-xl mx-auto">Analyze market indicators, screen top equity opportunities, or test other financial tools.</p>
+          
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <button 
+              onClick={() => navigate('/calculator')}
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
+            >
+              Explore All Calculators
+            </button>
+            <button 
+              onClick={() => navigate('/markets')}
+              className="px-5 py-2.5 bg-[#0E1320] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs rounded-xl transition-all cursor-pointer"
+            >
+              Explore Markets Terminal
+            </button>
+          </div>
+        </section>
+
+      </main>
+
+      {/* 11. FOOTER */}
+      <footer className="max-w-7xl mx-auto px-4 border-t border-slate-800/80 pt-8 mt-16 text-center text-xs text-slate-500">
+        <div className="flex items-center justify-center gap-2 mb-3">
+          <Logo />
+        </div>
+        <p className="max-w-2xl mx-auto text-[11px] leading-relaxed text-slate-500 mb-2">
+          ⚠️ Disclaimer: StockFinder calculators provide mathematical estimates based on financial inputs. Always verify results with a SEBI-registered advisor before investing.
+        </p>
+        <p className="text-[10px] text-slate-600">
+          © 2026 Stock Finder. Built with React.
+        </p>
+      </footer>
+
+    </div>
+  );
+}
