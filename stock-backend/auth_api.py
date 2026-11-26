@@ -1,8 +1,7 @@
 # auth_api.py — Login + per-user portfolio storage  (FastAPI + SQLite, no extra installs)
 #
-#  POST /auth/register    {name, email, password}             -> create practice account + log in   [NO OTP, NO KYC]
-#  POST /auth/guest                                           -> instant guest account + log in
-#  POST /auth/login       {user_id, password}                 -> {token, client_id, name}      (user_id = Client ID or email)
+#  POST /auth/signup      {token, application_id, password}   -> create (or reset) password   [needs OTP token]
+#  POST /auth/login       {user_id, password}                 -> {token, client_id, name}      (user_id = Client ID or mobile)
 #  GET  /auth/me          (Authorization: Bearer <token>)     -> who am I
 #  POST /auth/logout
 #  GET  /portfolio/state  (Bearer)                            -> this user's saved portfolio (or null)
@@ -14,14 +13,7 @@ from datetime import datetime
 from typing import Optional, Any, Dict
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
-import os, sqlite3
-
-DB_PATH = os.environ.get("SF_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "stockfinder.db"))
-
-def db():
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+from demat_api import db
 
 router = APIRouter()
 SESSION_DAYS = 7
@@ -66,6 +58,11 @@ def _user_from(authorization: Optional[str]):
         raise HTTPException(401, "Account not found")
     return u
 
+class Signup(BaseModel):
+    token: str
+    application_id: str
+    password: str
+
 class Login(BaseModel):
     user_id: str
     password: str
@@ -73,61 +70,33 @@ class Login(BaseModel):
 class StateBody(BaseModel):
     state: Dict[str, Any]
 
-class Register(BaseModel):
-    name: str
-    email: str
-    password: str
-
-def _new_client_id(c) -> str:
-    while True:
-        cid = "SFD" + "".join(str(secrets.randbelow(10)) for _ in range(8))
-        if not c.execute("SELECT 1 FROM users WHERE client_id=?", (cid,)).fetchone():
-            return cid
-
-def _issue(c, client_id: str) -> str:
-    token = secrets.token_urlsafe(32)
-    c.execute("INSERT INTO auth_sessions VALUES(?,?,?)", (_th(token), client_id, time.time() + SESSION_DAYS * 86400))
-    return token
-
-@router.post("/auth/register")
-def register(b: Register):
-    """Demo practice account: just name + email + password. The email is kept in the `mobile` column (it is only a login ID)."""
-    name = re.sub(r"\s+", " ", b.name).strip()
-    email = b.email.strip().lower()
-    if not (2 <= len(name) <= 40):
-        raise HTTPException(422, "Enter your name (2 to 40 letters)")
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or len(email) > 80:
-        raise HTTPException(422, "Enter a valid email")
-    if len(b.password) < 6:
-        raise HTTPException(422, "Password must be at least 6 characters")
+@router.post("/auth/signup")
+def signup(b: Signup):
+    if len(b.password) < 8 or not re.search(r"[A-Za-z]", b.password) or not re.search(r"\d", b.password):
+        raise HTTPException(422, "Password must be at least 8 characters and include a letter and a number")
+    now = time.time()
     with db() as c:
-        if c.execute("SELECT 1 FROM users WHERE mobile=?", (email,)).fetchone():
-            raise HTTPException(409, "This email already has an account. Please log in.")
-        cid = _new_client_id(c)
-        c.execute("INSERT INTO users(client_id,mobile,name,app_id,pw_hash,created_at) VALUES(?,?,?,?,?,?)",
-                  (cid, email, name, "PRACTICE", _hash_pw(b.password), datetime.now().isoformat(timespec="seconds")))
-        token = _issue(c, cid)
-    return {"token": token, "client_id": cid, "name": name}
-
-@router.post("/auth/guest")
-def guest():
-    """One-click guest account (no details). Old guests are deleted after 7 days."""
-    cutoff = datetime.fromtimestamp(time.time() - SESSION_DAYS * 86400).isoformat(timespec="seconds")
-    with db() as c:
-        old = [r["client_id"] for r in c.execute("SELECT client_id FROM users WHERE app_id='GUEST' AND created_at<?", (cutoff,)).fetchall()]
-        for cid in old:
-            for tbl in ("auth_sessions", "portfolios", "users"):
-                c.execute(f"DELETE FROM {tbl} WHERE client_id=?", (cid,))
-        cid = _new_client_id(c)
-        c.execute("INSERT INTO users(client_id,mobile,name,app_id,pw_hash,created_at) VALUES(?,?,?,?,?,?)",
-                  (cid, f"guest-{secrets.token_hex(5)}@guest.local", "Guest", "GUEST", _hash_pw(secrets.token_urlsafe(16)), datetime.now().isoformat(timespec="seconds")))
-        token = _issue(c, cid)
-    return {"token": token, "client_id": cid, "name": "Guest"}
+        sess = c.execute("SELECT * FROM sessions WHERE token=?", (b.token,)).fetchone()   # OTP-verified token
+        if not sess or sess["expires"] < now:
+            raise HTTPException(401, "Mobile verification expired. Please verify the OTP again.")
+        app = c.execute("SELECT * FROM applications WHERE id=? AND mobile=?", (b.application_id.strip().upper(), sess["mobile"])).fetchone()
+        if not app:
+            raise HTTPException(404, "No application found for this ID and mobile number")
+        if app["status"] != "APPROVED" or not app["client_id"]:
+            raise HTTPException(403, "Your application is not approved yet")
+        existing = c.execute("SELECT 1 FROM users WHERE client_id=?", (app["client_id"],)).fetchone()
+        if existing:
+            c.execute("UPDATE users SET pw_hash=?, fails=0, locked_until=0 WHERE client_id=?", (_hash_pw(b.password), app["client_id"]))
+            c.execute("DELETE FROM auth_sessions WHERE client_id=?", (app["client_id"],))      # sign out everywhere on reset
+        else:
+            c.execute("INSERT INTO users(client_id,mobile,name,app_id,pw_hash,created_at) VALUES(?,?,?,?,?,?)",
+                      (app["client_id"], app["mobile"], app["name"], app["id"], _hash_pw(b.password), datetime.now().isoformat(timespec="seconds")))
+        c.execute("DELETE FROM sessions WHERE token=?", (b.token,))
+    return {"ok": True, "client_id": app["client_id"], "reset": bool(existing)}
 
 @router.post("/auth/login")
 def login(b: Login):
-    raw = b.user_id.strip()
-    uid = raw.lower() if "@" in raw else (raw if raw.isdigit() else raw.upper())
+    uid = b.user_id.strip().upper() if not b.user_id.strip().isdigit() else b.user_id.strip()
     now = time.time()
     with db() as c:
         u = c.execute("SELECT * FROM users WHERE client_id=? OR mobile=?", (uid, uid)).fetchone()
@@ -146,13 +115,14 @@ def login(b: Login):
             c.commit()
             raise HTTPException(401, "Wrong ID or password")
         c.execute("UPDATE users SET fails=0 WHERE client_id=?", (u["client_id"],))
-        token = _issue(c, u["client_id"])
+        token = secrets.token_urlsafe(32)
+        c.execute("INSERT INTO auth_sessions VALUES(?,?,?)", (_th(token), u["client_id"], now + SESSION_DAYS * 86400))
     return {"token": token, "client_id": u["client_id"], "name": u["name"]}
 
 @router.get("/auth/me")
 def me(authorization: Optional[str] = Header(None)):
     u = _user_from(authorization)
-    return {"client_id": u["client_id"], "name": u["name"], "contact": ("" if u["mobile"].endswith("@guest.local") else u["mobile"])}
+    return {"client_id": u["client_id"], "name": u["name"], "mobile": u["mobile"][:2] + "XXXXXX" + u["mobile"][-2:]}
 
 @router.post("/auth/logout")
 def logout(authorization: Optional[str] = Header(None)):

@@ -4,6 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 import yfinance as yf
 from datetime import datetime
 import time
+import threading
+import requests
+from urllib.parse import quote
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -22,8 +25,7 @@ origins = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS", "http://localhost:5173").split(",")]
 app.add_middleware(CORSMiddleware, allow_origins=origins,
                    allow_methods=["*"], allow_headers=["*"])
-from demat_api import router as demat_router
-app.include_router(demat_router)
+# (old demat routes removed — simple practice accounts live in auth_api.py)
 
 from auth_api import router as auth_router
 app.include_router(auth_router)
@@ -96,130 +98,193 @@ INDEX_SYMBOLS = {
 }
 
 # ════════════════════════════════════════════════════════════
-#  HELPER — fetch one stock safely
+#  YAHOO DATA HELPERS  (fast, with time limits — never hangs)
+#  1) Try Yahoo's chart web-address directly (small + quick)
+#  2) If that fails, try yfinance (with a time limit)
+#  If both fail, the last good prices are kept (see "SNAPSHOT" below)
 # ════════════════════════════════════════════════════════════
-def get_stock_data(stock_info: dict):
-    yahoo_sym   = stock_info["yahoo"]
-    display_sym = stock_info["display"]
-    name        = stock_info["name"]
+UA = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "application/json",
+}
+LAST_ERROR = {"msg": ""}
+_YF_POOL = ThreadPoolExecutor(max_workers=4)
 
+
+def _num(x, default=0.0):
     try:
-        ticker = yf.Ticker(yahoo_sym)
+        return float(x)
+    except (TypeError, ValueError):
+        return default
 
-        try:
-            fi            = ticker.fast_info
-            current_price = round(fi.last_price or 0, 2)
-            prev_price    = round(fi.previous_close or current_price, 2)
 
-            if current_price and current_price > 0:
-                change     = round(current_price - prev_price, 2)
-                change_pct = round((change / prev_price) * 100, 2) if prev_price else 0
+def _chart_raw(yahoo_sym, rng="5d", interval="1d"):
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/" + quote(yahoo_sym, safe="")
+    r = requests.get(url, params={"range": rng, "interval": interval}, headers=UA, timeout=8)
+    r.raise_for_status()
+    res = r.json()["chart"]["result"][0]
+    return res["meta"], res["timestamp"], res["indicators"]["quote"][0]
 
-                return {
-                    "symbol":     display_sym,
-                    "name":       name,
-                    "price":      current_price,
-                    "prev_close": prev_price,
-                    "change":     change,
-                    "change_pct": change_pct,
-                    "up":         change >= 0,
-                    "high":       round(fi.day_high or current_price, 2),
-                    "low":        round(fi.day_low  or current_price, 2),
-                    "volume":     fi.three_month_average_volume or 0,
-                    "exchange":   "NSE",
-                }
-        except Exception:
-            pass  # fast_info failed, try history
 
-        hist = ticker.history(period="5d")
+def _chart_quote(yahoo_sym):
+    meta, _ts, q = _chart_raw(yahoo_sym, "5d", "1d")
+    closes = q.get("close") or []
+    idxs = [i for i, c in enumerate(closes) if c is not None]
+    if not idxs:
+        raise ValueError("no price data")
+    last = idxs[-1]
+    price = _num(meta.get("regularMarketPrice"), closes[last]) or closes[last]
+    prev = closes[idxs[-2]] if len(idxs) >= 2 else _num(meta.get("chartPreviousClose"), price)
+    high = (q.get("high") or [None] * (last + 1))[last]
+    low = (q.get("low") or [None] * (last + 1))[last]
+    vol = (q.get("volume") or [0] * (last + 1))[last]
+    return {"price": price, "prev": prev or price,
+            "high": _num(high, price) or price, "low": _num(low, price) or price,
+            "volume": int(_num(vol, 0))}
 
-        if hist.empty:
-            print(f"⚠️  No data for {yahoo_sym} — skipping")
-            return None
 
-        current_price = round(float(hist["Close"].iloc[-1]), 2)
-        prev_price    = round(float(hist["Close"].iloc[-2]), 2) if len(hist) >= 2 else current_price
-        change        = round(current_price - prev_price, 2)
-        change_pct    = round((change / prev_price) * 100, 2) if prev_price else 0
+def _yf_quote(yahoo_sym):
+    def work():
+        h = yf.Ticker(yahoo_sym).history(period="5d")
+        h = h.dropna(subset=["Close"])
+        if h.empty:
+            raise ValueError("yfinance returned no rows")
+        price = float(h["Close"].iloc[-1])
+        prev = float(h["Close"].iloc[-2]) if len(h) >= 2 else price
+        return {"price": price, "prev": prev, "high": float(h["High"].iloc[-1]),
+                "low": float(h["Low"].iloc[-1]), "volume": int(h["Volume"].iloc[-1])}
+    return _YF_POOL.submit(work).result(timeout=12)
 
-        return {
-            "symbol":     display_sym,
-            "name":       name,
-            "price":      current_price,
-            "prev_close": prev_price,
-            "change":     change,
-            "change_pct": change_pct,
-            "up":         change >= 0,
-            "high":       round(float(hist["High"].iloc[-1]), 2),
-            "low":        round(float(hist["Low"].iloc[-1]),  2),
-            "volume":     int(hist["Volume"].iloc[-1]),
-            "exchange":   "NSE",
-        }
 
+def _quote(yahoo_sym):
+    """Returns {price, prev, high, low, volume} or None. Never raises, never hangs."""
+    try:
+        return _chart_quote(yahoo_sym)
     except Exception as e:
-        print(f"❌ Error fetching {yahoo_sym}: {str(e)[:80]}")
+        LAST_ERROR["msg"] = f"{yahoo_sym} chart: {type(e).__name__}: {str(e)[:140]}"
+    try:
+        return _yf_quote(yahoo_sym)
+    except Exception as e:
+        LAST_ERROR["msg"] = f"{yahoo_sym} yfinance: {type(e).__name__}: {str(e)[:140]}"
         return None
 
 
+def _row(info, q):
+    price = round(q["price"], 2)
+    prev = round(q["prev"], 2)
+    change = round(price - prev, 2)
+    pct = round((change / prev) * 100, 2) if prev else 0
+    return {
+        "symbol": info["display"], "name": info["name"],
+        "price": price, "prev_close": prev, "change": change, "change_pct": pct,
+        "up": change >= 0, "high": round(q["high"], 2), "low": round(q["low"], 2),
+        "volume": q["volume"], "exchange": "NSE",
+    }
+
+
+def get_stock_data(stock_info: dict):
+    q = _quote(stock_info["yahoo"])
+    return _row(stock_info, q) if q else None
+
+
 def fetch_all_stocks_parallel(stock_list):
-    """
-    FIXED: The old version fired 10 SIMULTANEOUS individual yf.Ticker() requests,
-    which Yahoo Finance sees as burst traffic and rate-limits ("Too Many Requests").
-
-    This version fetches ALL symbols in ONE single batched yf.download() call —
-    this is how yfinance is designed to be used for multiple tickers, and it does
-    not trigger per-symbol rate limiting.
-    """
-    yahoo_symbols = [s["yahoo"] for s in stock_list]
-    symbol_map = {s["yahoo"]: s for s in stock_list}
-    results = []
-    failed = []
-
-    try:
-        data = yf.download(
-            tickers=" ".join(yahoo_symbols),
-            period="5d",
-            group_by="ticker",
-            threads=True,
-            progress=False,
-            auto_adjust=False,
-        )
-    except Exception as e:
-        print(f"❌ Batch download failed entirely: {str(e)[:120]}")
-        return [], [s["display"] for s in stock_list]
-
-    for yahoo_sym in yahoo_symbols:
-        info = symbol_map[yahoo_sym]
-        try:
-            df = data[yahoo_sym] if len(yahoo_symbols) > 1 else data
-            df = df.dropna(subset=["Close"])
-            if df.empty:
-                failed.append(info["display"])
-                continue
-
-            current_price = round(float(df["Close"].iloc[-1]), 2)
-            prev_price = round(float(df["Close"].iloc[-2]), 2) if len(df) >= 2 else current_price
-            change = round(current_price - prev_price, 2)
-            change_pct = round((change / prev_price) * 100, 2) if prev_price else 0
-
-            results.append({
-                "symbol":     info["display"],
-                "name":       info["name"],
-                "price":      current_price,
-                "prev_close": prev_price,
-                "change":     change,
-                "change_pct": change_pct,
-                "up":         change >= 0,
-                "high":       round(float(df["High"].iloc[-1]), 2),
-                "low":        round(float(df["Low"].iloc[-1]),  2),
-                "volume":     int(df["Volume"].iloc[-1]),
-                "exchange":   "NSE",
-            })
-        except Exception as e:
-            print(f"⚠️ Parse error for {yahoo_sym}: {str(e)[:80]}")
+    """Fetch many stocks at once (6 at a time), each with a time limit."""
+    if not stock_list:
+        return [], []
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        quotes = list(ex.map(lambda s: _quote(s["yahoo"]), stock_list))
+    results, failed = [], []
+    for info, q in zip(stock_list, quotes):
+        if q:
+            results.append(_row(info, q))
+        else:
             failed.append(info["display"])
-
     return results, failed
+
+
+def _chart_series(yahoo_sym, rng, interval="1d"):
+    """List of daily candles (for the stock detail chart). Empty list on failure."""
+    try:
+        _m, ts, q = _chart_raw(yahoo_sym, rng, interval)
+        out = []
+        for i, t in enumerate(ts):
+            c = q["close"][i]
+            if c is None:
+                continue
+            out.append({
+                "date": datetime.fromtimestamp(t).strftime("%Y-%m-%d"),
+                "close": round(float(c), 2),
+                "open": round(_num(q["open"][i], c), 2),
+                "high": round(_num(q["high"][i], c), 2),
+                "low": round(_num(q["low"][i], c), 2),
+                "vol": int(_num(q["volume"][i], 0)),
+            })
+        return out
+    except Exception as e:
+        LAST_ERROR["msg"] = f"{yahoo_sym} series: {type(e).__name__}: {str(e)[:140]}"
+        return []
+
+
+# ════════════════════════════════════════════════════════════
+#  SNAPSHOT — a background worker refreshes prices every 45 s.
+#  Web requests just read the latest saved copy, so they are instant
+#  and the site keeps showing the last good prices if Yahoo is slow.
+# ════════════════════════════════════════════════════════════
+SNAP = {"stocks": None, "indices": None}
+SNAP_TS = {"stocks": 0, "indices": 0}
+READY = threading.Event()
+
+
+def _snap(key, empty):
+    READY.wait(timeout=15)          # only matters in the first seconds after start
+    d = SNAP.get(key)
+    if d:
+        return dict(d, age_seconds=int(time.time() - SNAP_TS[key]))
+    return dict(empty, status="unavailable", error=LAST_ERROR["msg"])
+
+
+def _refresh_loop():
+    while True:
+        try:
+            s = _fetch_all_stocks()
+            if s["count"] > 0:
+                SNAP["stocks"] = s
+                SNAP_TS["stocks"] = time.time()
+        except Exception as e:
+            LAST_ERROR["msg"] = f"stocks refresh: {type(e).__name__}: {str(e)[:140]}"
+        try:
+            i = _fetch_indices()
+            if i["indices"]:
+                SNAP["indices"] = i
+                SNAP_TS["indices"] = time.time()
+        except Exception as e:
+            LAST_ERROR["msg"] = f"indices refresh: {type(e).__name__}: {str(e)[:140]}"
+        READY.set()
+        time.sleep(45)
+
+
+@app.on_event("startup")
+def _start_background():
+    threading.Thread(target=_refresh_loop, daemon=True).start()
+
+
+@app.get("/debug/yahoo")
+def debug_yahoo():
+    """Open this link in the browser to see WHY prices are missing."""
+    out = {
+        "yfinance_version": getattr(yf, "__version__", "?"),
+        "last_error": LAST_ERROR["msg"],
+        "have_stocks": bool(SNAP["stocks"]),
+        "have_indices": bool(SNAP["indices"]),
+    }
+    try:
+        out["chart_test_RELIANCE"] = _chart_quote("RELIANCE.NS")
+    except Exception as e:
+        out["chart_test_error"] = f"{type(e).__name__}: {str(e)[:300]}"
+    return out
+
+
 
 
 # ════════════════════════════════════════════════════════════
@@ -250,7 +315,7 @@ def _fetch_all_stocks():
 
 @app.get("/stocks")
 def get_all_stocks():
-    return get_cached("all_stocks", _fetch_all_stocks)
+    return _snap("stocks", {"count": 0, "failed": [], "updated_at": datetime.now().isoformat(), "stocks": []})
 
 
 # ════════════════════════════════════════════════════════════
@@ -271,26 +336,12 @@ def get_single_stock(symbol: str):
             return None
 
         try:
-            ticker  = yf.Ticker(stock_info["yahoo"])
-            hist_1m = ticker.history(period="1mo")
-            hist_1y = ticker.history(period="1y")
-
-            chart_data = [
-                {
-                    "date":  str(idx.date()),
-                    "close": round(float(row["Close"]), 2),
-                    "open":  round(float(row["Open"]),  2),
-                    "high":  round(float(row["High"]),  2),
-                    "low":   round(float(row["Low"]),   2),
-                    "vol":   int(row["Volume"]),
-                }
-                for idx, row in hist_1m.iterrows()
-            ] if not hist_1m.empty else []
-
+            sym = stock_info["yahoo"]
+            chart_data = _chart_series(sym, "1mo")
+            hist_1y = _chart_series(sym, "1y")
             data["chart"]       = chart_data
-            data["week52_high"] = round(float(hist_1y["High"].max()), 2) if not hist_1y.empty else data["high"]
-            data["week52_low"]  = round(float(hist_1y["Low"].min()),  2) if not hist_1y.empty else data["low"]
-
+            data["week52_high"] = max((c["high"] for c in hist_1y), default=data["high"])
+            data["week52_low"]  = min((c["low"] for c in hist_1y), default=data["low"])
         except Exception as e:
             print(f"Chart error for {symbol}: {e}")
             data["chart"] = []
@@ -311,48 +362,24 @@ def get_single_stock(symbol: str):
 #  ROUTE 4 — Live indices (CACHED)
 # ════════════════════════════════════════════════════════════
 def _fetch_indices():
+    names = list(INDEX_SYMBOLS.items())
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        quotes = list(ex.map(lambda kv: _quote(kv[1]), names))
     results = []
-    for name, symbol in INDEX_SYMBOLS.items():
-        try:
-            ticker = yf.Ticker(symbol)
-            try:
-                fi      = ticker.fast_info
-                current = round(fi.last_price or 0, 2)
-                prev    = round(fi.previous_close or current, 2)
-                if current > 0:
-                    change = round(current - prev, 2)
-                    pct    = round((change / prev) * 100, 2) if prev else 0
-                    results.append({
-                        "name": name, "symbol": symbol,
-                        "value": current, "change": change,
-                        "change_pct": pct, "up": change >= 0,
-                    })
-                    continue
-            except Exception:
-                pass
-
-            hist = ticker.history(period="5d")
-            if hist.empty:
-                continue
-
-            current = round(float(hist["Close"].iloc[-1]), 2)
-            prev    = round(float(hist["Close"].iloc[-2]), 2) if len(hist) >= 2 else current
-            change  = round(current - prev, 2)
-            pct     = round((change / prev) * 100, 2) if prev else 0
-
-            results.append({
-                "name": name, "symbol": symbol,
-                "value": current, "change": change,
-                "change_pct": pct, "up": change >= 0,
-            })
-        except Exception as e:
-            print(f"Index error {name}: {e}")
-
+    for (name, symbol), q in zip(names, quotes):
+        if not q:
+            continue
+        current = round(q["price"], 2)
+        prev = round(q["prev"], 2)
+        change = round(current - prev, 2)
+        pct = round((change / prev) * 100, 2) if prev else 0
+        results.append({"name": name, "symbol": symbol, "value": current,
+                        "change": change, "change_pct": pct, "up": change >= 0})
     return {"updated_at": datetime.now().isoformat(), "indices": results}
 
 @app.get("/indices")
 def get_indices():
-    return get_cached("indices", _fetch_indices)
+    return _snap("indices", {"updated_at": datetime.now().isoformat(), "indices": []})
 
 
 # ════════════════════════════════════════════════════════════
@@ -474,8 +501,8 @@ def get_listed_ipos():
 # ════════════════════════════════════════════════════════════
 def _fetch_gainers_losers():
     # Reuses the same cached /stocks data instead of re-fetching from Yahoo
-    all_data = get_cached("all_stocks", _fetch_all_stocks)
-    all_stocks = all_data["stocks"]
+    all_data = _snap("stocks", {"stocks": []})
+    all_stocks = all_data.get("stocks", [])
 
     gainers = sorted(all_stocks, key=lambda x: x["change_pct"], reverse=True)[:5]
     losers  = sorted(all_stocks, key=lambda x: x["change_pct"])[:5]
