@@ -1,7 +1,6 @@
 fastapi==0.111.0
 uvicorn==0.29.0
 yfinance
-curl_cffi
 python-multipart==0.0.9
 httpx==0.27.0
  
